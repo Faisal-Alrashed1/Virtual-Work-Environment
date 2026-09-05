@@ -1,14 +1,14 @@
 # Virtual Work Environment (Venv)
 
-منصة عربية تحاكي بيئة العمل للطلاب وحديثي التخرج. تحلل السيرة الذاتية، تحدد المستوى عبر 10 أسئلة، تبني مسارًا مهنيًا، ثم تدير مهمة واحدة في كل مرة بواسطة Manager وMentor وHR.
+An AI-powered work simulation platform for students and recent graduates. It analyzes a CV, evaluates the user's level through 10 questions, creates a personalized career path, and assigns one task at a time through three connected AI agents: Manager, Mentor, and HR.
 
-## المتطلبات
+## Requirements
 
 - Docker Desktop
 - Git
-- مفتاح OpenAI اختياري؛ بدونه يعمل النظام بالردود التجريبية
+- An OpenAI API key (optional; the app uses demo responses without one)
 
-## التشغيل لأول مرة
+## First-Time Setup
 
 ```bash
 git clone https://github.com/Faisal-Alrashed1/Virtual-Work-Environment.git
@@ -17,64 +17,68 @@ cp .env.example .env
 docker compose up --build
 ```
 
-إذا أردت تشغيل الذكاء الاصطناعي الحقيقي، افتح ملف `.env` وضع المفتاح بعد علامة `=`:
+To enable real AI responses, open `.env` and add your key:
 
 ```env
-OPENAI_API_KEY=ضع_مفتاحك_هنا
+OPENAI_API_KEY=your_key_here
 ```
 
-ملف `.env` مستبعد من Git، لذلك لا يُرفع إلى GitHub. لا تضع المفتاح في `.env.example` أو داخل الكود.
+The `.env` file is ignored by Git and will not be uploaded. Never place a real key in `.env.example` or in the source code.
 
-بعد ظهور رسالة `Ready` افتح:
+When Docker displays `Ready`, open:
 
-- الموقع: http://localhost:3000
-- توثيق API: http://localhost:8000/docs
+- Web app: http://localhost:3000
+- API documentation: http://localhost:8000/docs
 
-## أوامر الاستخدام
+## Common Commands
 
 ```bash
-# تشغيل لاحق في الخلفية
+# Start in the background
 docker compose up -d
 
-# عرض الحالة
+# Check service status
 docker compose ps
 
-# عرض السجلات
+# View live logs
 docker compose logs -f
 
-# إيقاف المشروع
+# Stop the project
 docker compose down
 
-# إعادة البناء بعد تعديل الكود
+# Rebuild after code changes
 docker compose up -d --build
 ```
 
-على macOS يجب أن يكون Docker Desktop مفتوحًا وتظهر حالة `Engine running` قبل التشغيل.
+On macOS, Docker Desktop must be open and show `Engine running` before you run these commands.
 
-## تجربة النظام
+## How to Try the Platform
 
-1. أنشئ حسابًا وارفع CV بصيغة PDF أو DOCX، بحد أقصى 8MB.
-2. أجب عن 10 أسئلة تحديد المستوى، ثم اكتب هدفك بصراحة.
-3. أنشئ المسار وابدأ المهمة التي يرسلها Manager.
-4. استشر Mentor، ثم سلّم رابط GitHub وناقش النتيجة.
-5. راجع تقييمات Manager وMentor وHR ثم انتقل للمهمة التالية.
+1. Create an account and upload a PDF or DOCX CV (maximum 8 MB).
+2. Answer the 10 level-assessment questions and describe your learning goal.
+3. Generate your career path and start the task assigned by the Manager.
+4. Ask the Mentor for guidance, submit your GitHub link, and discuss the result.
+5. Review the independent Manager, Mentor, and HR evaluations, then continue to the next task.
 
-## البنية التقنية
+## Technology
 
-- `apps/web`: واجهة Next.js وReact.
-- `apps/api`: خلفية FastAPI وPython والوكلاء ودورة المهام.
-- `db`: PostgreSQL مع pgvector داخل Docker.
-- `infra`: تهيئة قاعدة البيانات.
+- `apps/web`: Next.js and React frontend.
+- `apps/api`: FastAPI and Python backend, AI agents, and task lifecycle.
+- `db`: PostgreSQL with pgvector, running in Docker.
+- `infra`: Database initialization files.
 
-## الاختبارات
+## Run Tests
 
 ```bash
 docker compose exec api sh -lc "PYTHONPATH=/app pytest -q"
 ```
 
-## حل المشاكل السريع
+## Troubleshooting
 
-- `docker: command not found`: افتح Docker Desktop ثم أعد فتح Terminal.
-- `connection refused`: نفذ `docker compose ps` وتأكد أن `web` و`api` و`db` تعمل.
-- `Load failed`: افحص `docker compose logs api` وتأكد من صحة `.env`.
-- بعد تغيير المفتاح: نفذ `docker compose up -d --force-recreate api`.
+- `docker: command not found`: Open Docker Desktop, then reopen Terminal.
+- `connection refused`: Run `docker compose ps` and confirm that `web`, `api`, and `db` are running.
+- `Load failed`: Run `docker compose logs api` and verify the values in `.env`.
+- After changing the API key, run `docker compose up -d --force-recreate api`.
+
+## Security
+
+Local environment files, uploaded CVs, database files, build output, dependencies, and logs are excluded from Git. Do not commit real credentials or sensitive production data.
