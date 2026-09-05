@@ -1,0 +1,32 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: venv
+      POSTGRES_PASSWORD: venv
+      POSTGRES_DB: venv
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U venv"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  api:
+    build: ./apps/api
+    env_file: .env
+    ports: ["8000:8000"]
+    volumes: ["uploads:/data/uploads"]
+    depends_on:
+      db:
+        condition: service_healthy
+  web:
+    build: ./apps/web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports: ["3000:3000"]
+    depends_on: [api]
+volumes:
+  postgres_data:
+  uploads:
