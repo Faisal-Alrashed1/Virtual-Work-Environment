@@ -10,6 +10,7 @@ type IntakeState = {profile_exists: boolean; confirmed: boolean; progress: numbe
 export default function Intake() {
   const router = useRouter();
   const [step, setStep] = useState(1);
+  const [cvMode, setCvMode] = useState<"upload" | "create">("upload");
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -37,6 +38,21 @@ export default function Intake() {
       const response = await api<{assistant: string}>("/api/intake/cv", {method: "POST", body: new FormData(e.currentTarget)});
       setMsgs([{sender: "agent", body: response.assistant}]); setProgress(0); setQuestionsComplete(false); setGoal(""); setGoalSaved(false); setStep(2);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "تعذر رفع السيرة"); }
+    finally { setLoading(false); }
+  }
+
+  async function createCv(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); if (loading) return;
+    setError(""); setLoading(true);
+    const form = new FormData(e.currentTarget);
+    try {
+      const response = await api<{assistant: string}>("/api/intake/manual-cv", {method: "POST", body: JSON.stringify({
+        education: form.get("education"),
+        skills: String(form.get("skills") || "").split(",").map(item => item.trim()).filter(Boolean),
+        projects: form.get("projects"), experience: form.get("experience"), target_role: form.get("target_role"),
+      })});
+      setMsgs([{sender: "agent", body: response.assistant}]); setProgress(0); setQuestionsComplete(false); setStep(2);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "تعذر إنشاء الملف المهني"); }
     finally { setLoading(false); }
   }
 
@@ -76,12 +92,15 @@ export default function Intake() {
     <div className="brand"><span className="brandmark">V</span> Venv</div>
     <p className="eyebrow" style={{marginTop: 42}}>تهيئة ملفك المهني · {step}/2</p>
     <h1 className="title">{step === 1 ? "لنبدأ من خبرتك الحالية" : questionsComplete ? "ما الذي تريد الوصول إليه؟" : "نحدد نقطة البداية معًا"}</h1>
-    {step === 1 ? <form className="panel side form intake-card" onSubmit={upload}>
-      <p>السيرة تعطينا السياق، ثم عشرة أسئلة قصيرة تقيس نقطة البداية الفعلية. يمكنك البدء من الصفر تمامًا.</p>
+    {step === 1 ? <section className="panel side form intake-card">
+      <p>ارفع سيرتك الحالية أو أنشئ ملفًا مهنيًا جديدًا، ثم نحدد نقطة البداية بأسئلة قصيرة.</p>
+      <div className="task-actions"><button className={`btn ${cvMode === "upload" ? "" : "secondary"}`} onClick={() => setCvMode("upload")}>رفع CV</button><button className={`btn ${cvMode === "create" ? "" : "secondary"}`} onClick={() => setCvMode("create")}>إنشاء CV</button></div>
+      {cvMode === "upload" ? <form onSubmit={upload}>
       <div className="upload"><input name="file" type="file" accept=".pdf,.docx" required disabled={loading}/><p>PDF أو DOCX · حتى 8MB</p></div>
       {loading && <p className="status-line"><i className="dot"/> جارٍ قراءة السيرة وتحليلها…</p>}{error && <p className="error">{error}</p>}
       <button className="btn" disabled={loading}>{loading ? "جارٍ التحليل…" : "ابدأ تحديد المستوى"}</button>
-    </form> : <section className="panel diagnostic-card">
+      </form> : <form onSubmit={createCv} style={{marginTop: 18}}><label>التعليم</label><input name="education" required/><label>المهارات، مفصولة بفاصلة</label><input name="skills" placeholder="HTML, CSS, JavaScript" required/><label>المشاريع</label><textarea name="projects" rows={3}/><label>الخبرة</label><textarea name="experience" rows={3}/><label>الوظيفة المستهدفة</label><input name="target_role" defaultValue="Web Developer" required/>{error && <p className="error">{error}</p>}<button className="btn" disabled={loading}>{loading ? "جارٍ الإنشاء…" : "أنشئ ملفي وابدأ التقييم"}</button></form>}
+    </section> : <section className="panel diagnostic-card">
       <div className="chathead"><div><strong>تشخيص نقطة البداية</strong><small>السيرة + المهارات الفعلية + هدفك الصريح</small></div><span className="score-pill">{progress}/10</span></div>
       <div className="diagnostic-progress"><span style={{width: `${progress * 10}%`}}/></div>
       <div className="messages diagnostic-messages">{msgs.map((message, index) => <div key={message.id || index} className={`message ${message.sender}`}>{message.body}</div>)}</div>

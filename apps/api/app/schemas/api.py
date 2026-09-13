@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, HttpUrl
+from pydantic import BaseModel, EmailStr, Field, HttpUrl, model_validator
 from app.models.domain import UserRole, TaskStatus
 
 
@@ -18,6 +18,14 @@ class DiagnosticMessage(BaseModel):
     message: str = Field(min_length=2, max_length=4000)
 
 
+class ManualCVIn(BaseModel):
+    education: str = Field(min_length=2, max_length=1000)
+    skills: list[str] = Field(min_length=1, max_length=30)
+    projects: str = Field(default="", max_length=4000)
+    experience: str = Field(default="", max_length=4000)
+    target_role: str = Field(default="Web Developer", min_length=2, max_length=200)
+
+
 class ProfileConfirm(BaseModel):
     corrections: str = ""
 
@@ -32,9 +40,19 @@ class ChatIn(BaseModel):
 
 
 class SubmissionIn(BaseModel):
-    github_url: HttpUrl
+    github_url: HttpUrl | None = None
+    code: str | None = Field(default=None, max_length=50_000)
+    language: str = Field(default="python", max_length=50)
     summary: str = Field(min_length=10)
     challenges: str = ""
+
+    @model_validator(mode="after")
+    def require_one_source(self):
+        if not self.github_url and not (self.code and self.code.strip()):
+            raise ValueError("اكتب الكود أو أضف رابط GitHub")
+        if self.github_url and self.code and self.code.strip():
+            raise ValueError("اختر طريقة تسليم واحدة فقط")
+        return self
 
 
 class StatusIn(BaseModel):

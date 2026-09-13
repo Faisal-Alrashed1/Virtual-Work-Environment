@@ -15,12 +15,13 @@ oauth = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 def hash_password(value: str) -> str: return pwd.hash(value)
 def verify_password(value: str, hashed: str) -> bool: return pwd.verify(value, hashed)
 def token(user: User) -> str:
-    payload = {"sub": user.id, "role": user.role.value, "exp": datetime.now(timezone.utc) + timedelta(hours=12)}
+    now = datetime.now(timezone.utc)
+    payload = {"sub": user.id, "role": user.role.value, "iat": now, "exp": now + timedelta(minutes=settings.jwt_expire_minutes), "iss": "venv-api"}
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
 def current_user(raw: str = Depends(oauth), db: Session = Depends(get_db)) -> User:
-    try: user_id = jwt.decode(raw, settings.jwt_secret, algorithms=["HS256"])["sub"]
+    try: user_id = jwt.decode(raw, settings.jwt_secret, algorithms=["HS256"], issuer="venv-api")["sub"]
     except (JWTError, KeyError): raise HTTPException(401, "جلسة غير صالحة")
     user = db.get(User, user_id)
     if not user: raise HTTPException(401, "المستخدم غير موجود")

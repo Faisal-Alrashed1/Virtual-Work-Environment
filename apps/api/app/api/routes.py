@@ -1,59 +1,23 @@
 import json
+import hashlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.security import current_user, hash_password, token, verify_password
-from app.models.domain import AssessmentCampaign, CareerProfile, Evaluation, HiringDecision, KnowledgeDocument, Message, Organization, RecruiterIntervention, Submission, Task, TaskStatus, User, UserRole, WeeklyReport, WorkCycle
-from app.schemas.api import CampaignIn, CampaignTaskIn, ChatIn, DecisionIn, InterventionIn, KnowledgeIn, LearningGoalIn, Login, OrganizationIn, ProfileConfirm, Register, StatusIn, SubmissionIn
+from app.api.dependencies import owned_task, recruiter_org
+from app.models.domain import AssessmentCampaign, CareerProfile, Evaluation, HiringDecision, KnowledgeDocument, Message, Organization, RecruiterIntervention, Submission, SubmissionArtifact, Task, TaskStatus, User, UserRole, WeeklyReport, WorkCycle
+from app.schemas.api import CampaignIn, CampaignTaskIn, ChatIn, DecisionIn, InterventionIn, KnowledgeIn, LearningGoalIn, Login, ManualCVIn, OrganizationIn, ProfileConfirm, Register, StatusIn, SubmissionIn
 from app.services.ai import ai
 from app.services.documents import ALLOWED, extract_text, safe_save
 from app.services.github import pin_repository
+from app.services.onboarding import DIAGNOSTIC_QUESTIONS, answer_score, diagnostic_state
 from app.services.orchestrator import create_cycle_and_task, evaluate_task, shared_agent_context, sync_agents, weekly_report
 
 router = APIRouter(prefix="/api")
-
-DIAGNOSTIC_QUESTIONS = [
-    "هل تعرف أساسيات البرمجة مثل المتغيرات والشروط والدوال؟",
-    "هل سبق أن كتبت برنامجًا بسيطًا بلغة Python بنفسك؟",
-    "هل تعرف أساسيات الواجهة الأمامية مثل HTML وCSS وJavaScript؟",
-    "هل تعرف ما هو الـBackend أو سبق أن بنيت API؟",
-    "هل تعاملت مع قاعدة بيانات أو كتبت أوامر SQL؟",
-    "هل استخدمت Git وGitHub لحفظ مشروع ورفع التعديلات؟",
-    "هل تستطيع تتبع خطأ في الكود وكتابة اختبار بسيط؟",
-    "هل سبق أن ربطت تطبيقًا بنموذج ذكاء اصطناعي عبر API؟",
-    "هل تعرف فكرة AI Agents واستخدام الأدوات أو RAG؟",
-    "هل تعرف أساسيات حماية المفاتيح وتشغيل التطبيق أو نشره؟",
-]
-
-
-def _diagnostic_state(profile: CareerProfile) -> dict:
-    try:
-        state = json.loads(profile.diagnostic_summary or "{}")
-    except (json.JSONDecodeError, TypeError):
-        state = {}
-    answers = state.get("answers", [])
-    state["answers"] = answers if isinstance(answers, list) else []
-    return state
-
-
-def _answer_score(answer: str) -> int:
-    normalized = answer.strip().lower()
-    negative = ("لا", "ما أعرف", "ماعندي", "لم أجرب", "من الصفر", "0")
-    positive = ("نعم", "اعرف", "أعرف", "جربت", "سبق", "عندي", "1")
-    if normalized == "0" or any(token in normalized for token in negative): return 0
-    if normalized == "1" or any(token in normalized for token in positive): return 1
-    return 0
-
-
-def owned_task(db: Session, task_id: str, user: User) -> Task:
-    task = db.get(Task, task_id)
-    if not task or task.user_id != user.id: raise HTTPException(404, "المهمة غير موجودة")
-    return task
-
 
 @router.post("/auth/register")
 def register(data: Register, db: Session = Depends(get_db)):
@@ -78,7 +42,7 @@ def me(user: User = Depends(current_user)): return {"id": user.id, "name": user.
 def intake_state(user: User = Depends(current_user), db: Session = Depends(get_db)):
     profile = db.scalar(select(CareerProfile).where(CareerProfile.user_id == user.id))
     if not profile: return {"profile_exists": False, "confirmed": False, "progress": 0, "total": 10, "messages": []}
-    state = _diagnostic_state(profile); progress = min(len(state["answers"]), 10)
+    state = diagnostic_state(profile); progress = min(len(state["answers"]), 10)
     rows = list(db.scalars(select(Message).where(Message.user_id == user.id, Message.agent == "career").order_by(Message.created_at.desc()).limit(30)))
     messages = [{"id": item.id, "sender": item.sender, "body": item.body} for item in reversed(rows) if item.kind in {"diagnostic_question", "diagnostic_answer", "diagnostic_result", "learning_goal"}]
     score = sum(int(item.get("score", 0)) for item in state["answers"][:10])
@@ -90,7 +54,7 @@ def intake_state(user: User = Depends(current_user), db: Session = Depends(get_d
 async def upload_cv(file: UploadFile = File(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
     if file.content_type not in ALLOWED: raise HTTPException(415, "يدعم النظام PDF وDOCX فقط")
     data = await file.read()
-    if len(data) > 8_000_000: raise HTTPException(413, "حجم الملف يتجاوز 8MB")
+    if len(data) > settings.max_upload_bytes: raise HTTPException(413, "حجم الملف يتجاوز 8MB")
     try: text = extract_text(data, file.content_type or "")
     except Exception: raise HTTPException(422, "تعذر قراءة السيرة الذاتية")
     if len(text.strip()) < 80: raise HTTPException(422, "لا يوجد نص كافٍ في السيرة الذاتية")
@@ -105,16 +69,38 @@ async def upload_cv(file: UploadFile = File(...), user: User = Depends(current_u
     return {"profile": parsed, "assistant": opening, "confirmed": False, "progress": 0, "total": 10}
 
 
+@router.post("/intake/manual-cv")
+def create_manual_cv(data: ManualCVIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    extracted = {
+        "education": data.education,
+        "skills": [skill.strip() for skill in data.skills if skill.strip()],
+        "projects": data.projects,
+        "experience": data.experience,
+        "target_role": data.target_role,
+        "experience_level": "junior",
+    }
+    profile = db.scalar(select(CareerProfile).where(CareerProfile.user_id == user.id)) or CareerProfile(user_id=user.id)
+    profile.cv_path = None
+    profile.extracted = extracted
+    profile.diagnostic_summary = json.dumps({"answers": []}, ensure_ascii=False)
+    profile.confirmed = False
+    db.add(profile)
+    opening = f"تم إنشاء ملفك المهني. سنحدد نقطة البداية بعشرة أسئلة قصيرة. السؤال 1 من 10: {DIAGNOSTIC_QUESTIONS[0]}"
+    db.add(Message(user_id=user.id, agent="career", sender="agent", body=opening, kind="diagnostic_question"))
+    db.commit()
+    return {"profile": extracted, "assistant": opening, "confirmed": False, "progress": 0, "total": 10}
+
+
 @router.post("/intake/chat")
 def intake_chat(data: ChatIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     profile = db.scalar(select(CareerProfile).where(CareerProfile.user_id == user.id))
     if not profile: raise HTTPException(409, "ارفع السيرة الذاتية أولًا")
-    state = _diagnostic_state(profile)
+    state = diagnostic_state(profile)
     index = len(state["answers"])
     if index >= len(DIAGNOSTIC_QUESTIONS):
         score = sum(item["score"] for item in state["answers"])
         return {"reply": f"اكتمل التشخيص. نتيجتك {score} من 10. اكتب الآن بصراحة ما الذي تريد تعلمه وما الذي تشعر أنه ينقصك عن سوق العمل.", "ready": bool(state.get("open_goal")), "questions_complete": True, "progress": 10, "total": 10, "score": score}
-    point = _answer_score(data.body)
+    point = answer_score(data.body)
     state["answers"].append({"question": DIAGNOSTIC_QUESTIONS[index], "answer": data.body, "score": point})
     profile.diagnostic_summary = json.dumps(state, ensure_ascii=False)
     db.add(Message(user_id=user.id, agent="career", sender="user", body=data.body, kind="diagnostic_answer"))
@@ -134,7 +120,7 @@ def intake_chat(data: ChatIn, user: User = Depends(current_user), db: Session = 
 def save_learning_goal(data: LearningGoalIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     profile = db.scalar(select(CareerProfile).where(CareerProfile.user_id == user.id))
     if not profile: raise HTTPException(409, "ارفع السيرة الذاتية أولًا")
-    state = _diagnostic_state(profile)
+    state = diagnostic_state(profile)
     if len(state["answers"]) < 10: raise HTTPException(409, "أكمل أسئلة تحديد المستوى أولًا")
     state["open_goal"] = data.goal.strip()
     profile.diagnostic_summary = json.dumps(state, ensure_ascii=False)
@@ -146,20 +132,62 @@ def save_learning_goal(data: LearningGoalIn, user: User = Depends(current_user),
 def confirm_profile(data: ProfileConfirm, user: User = Depends(current_user), db: Session = Depends(get_db)):
     profile = db.scalar(select(CareerProfile).where(CareerProfile.user_id == user.id))
     if not profile: raise HTTPException(409, "ارفع السيرة الذاتية أولًا")
-    state = _diagnostic_state(profile)
+    state = diagnostic_state(profile)
     if len(state["answers"]) < 10: raise HTTPException(409, f"أكمل الأسئلة العشرة أولًا ({len(state['answers'])}/10)")
     open_goal = state.get("open_goal", "").strip()
     if len(open_goal) < 10: raise HTTPException(409, "اكتب ما تريد تعلمه وما ينقصك عن سوق العمل أولًا")
     score = sum(item["score"] for item in state["answers"]); difficulty = min(5, score // 2 + 1)
     gaps = [item["question"] for item in state["answers"] if item["score"] == 0]
-    fallback_path = {"goal": "AI Agent Engineer", "focus": open_goal, "assessment": {"score": score, "out_of": 10, "starting_difficulty": difficulty, "gaps": gaps}, "stages": [{"name": "تثبيت الأساس المطلوب", "status": "current", "skills": ["Python", "Git", "Web basics"]}, {"name": "تطبيقات الذكاء الاصطناعي", "status": "next", "skills": ["APIs", "Prompting", "Testing"]}, {"name": "هندسة AI Agents", "status": "future", "skills": ["Tools", "RAG", "Security", "Observability"]}]}
-    path_prompt = f"ابنِ مسار AI Agent Engineer من ثلاث مراحل فقط. اربط السيرة بالتقييم ولا تفترض إتقان مهارة لمجرد وجودها في السيرة. أعد JSON بنفس بنية المثال. السيرة المستخرجة: {profile.extracted}. نتيجة الأسئلة: {score}/10. الفجوات: {gaps}. ما يريد المستخدم تعلمه وما يراه ناقصًا: {open_goal}. المثال: {fallback_path}"
+    fallback_path = {"goal": "Web Developer", "focus": open_goal, "assessment": {"score": score, "out_of": 10, "starting_difficulty": difficulty, "gaps": gaps}, "stages": [{"name": "أساسيات Web", "status": "current", "skills": ["HTML", "CSS", "JavaScript", "Git"]}, {"name": "تطبيق متكامل", "status": "next", "skills": ["Frontend", "Backend", "API", "Database"]}, {"name": "جودة المشروع", "status": "future", "skills": ["Testing", "Security", "Deployment"]}]}
+    path_prompt = f"ابنِ مسار Web Developer عام من ثلاث مراحل فقط. اربط السيرة بالتقييم العام في frontend وbackend وAPI وقواعد البيانات، ولا تفترض إتقان مهارة لمجرد وجودها في السيرة. أعد JSON بنفس بنية المثال. السيرة: {profile.extracted}. النتيجة: {score}/10. الفجوات: {gaps}. هدف المستخدم: {open_goal}. المثال: {fallback_path}"
     career_path = ai.structured(path_prompt, fallback_path)
     career_path["assessment"] = fallback_path["assessment"]; career_path["focus"] = open_goal
+    career_path["performance_score"] = score * 10
+    career_path["project"] = {"status": "ready", "name": "Junior Web Workspace", "tasks_per_week": 5}
     profile.confirmed = True
     profile.career_path = career_path
+    db.commit()
+    return {"career_path": profile.career_path, "next": "project_kickoff"}
+
+
+@router.post("/project/join")
+def join_project(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    profile = db.scalar(select(CareerProfile).where(CareerProfile.user_id == user.id))
+    if not profile or not profile.confirmed: raise HTTPException(409, "أكمل ملفك وتحديد المستوى أولًا")
+    path = dict(profile.career_path or {}); project = dict(path.get("project", {}))
+    project.update({"status": "kickoff", "name": "Junior Web Workspace", "tasks_per_week": 5})
+    path["project"] = project; profile.career_path = path
+    overview = """مرحبًا بك كـJunior Web Developer في مشروع Junior Web Workspace. هدف المشروع بناء تطبيق Web صغير ومنظم يعمل من الواجهة حتى قاعدة البيانات. البنية المتوقعة: Frontend واضح، Backend API، وقاعدة بيانات محلية آمنة. أسبوعك يتكون من خمس مهام صغيرة متتابعة؛ لا تظهر مهمة جديدة قبل مراجعة السابقة. Senior هو مشرفك المباشر طوال التنفيذ، ويقدم تلميحات ومراجعات دون تنفيذ الحل عنك. بعد المهمة الخامسة يرفع Senior تقريرًا تقنيًا إلى Manager، ثم يرسل Manager تقييمه إلى HR للتقييم السلوكي وتحديث مستواك. النتيجة المتوقعة: مشروع يعمل، كود منظم، اختبارات أساسية، أسرار محمية، وسجل أداء موثق."""
+    db.add(Message(user_id=user.id, agent="manager", sender="agent", body=overview, kind="project_kickoff"))
+    db.commit()
+    return {"status": "kickoff", "overview": overview}
+
+
+@router.post("/project/start")
+def start_project(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    profile = db.scalar(select(CareerProfile).where(CareerProfile.user_id == user.id))
+    project = dict((profile.career_path or {}).get("project", {})) if profile else {}
+    if project.get("status") != "kickoff": raise HTTPException(409, "انضم للمشروع واقرأ اجتماع التعريف أولًا")
+    kickoff = db.scalar(select(Message).where(Message.user_id == user.id, Message.kind == "project_kickoff").order_by(Message.created_at.desc()))
+    if kickoff:
+        legacy_tasks = list(db.scalars(select(Task).where(Task.user_id == user.id, Task.status != TaskStatus.reviewed, Task.created_at < kickoff.created_at)))
+        for legacy_task in legacy_tasks:
+            legacy_task.status = TaskStatus.reviewed
+            legacy_cycle = db.get(WorkCycle, legacy_task.cycle_id)
+            if legacy_cycle: legacy_cycle.report_generated = True
+    project["status"] = "active"; path = dict(profile.career_path); path["project"] = project; profile.career_path = path
     db.commit(); task = create_cycle_and_task(db, user.id)
-    return {"career_path": profile.career_path, "task_id": task.id}
+    return {"status": "active", "task_id": task.id}
+
+
+@router.post("/project/next-week")
+def start_next_week(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    profile = db.scalar(select(CareerProfile).where(CareerProfile.user_id == user.id))
+    project = dict((profile.career_path or {}).get("project", {})) if profile else {}
+    if project.get("status") != "week_complete": raise HTTPException(409, "لم يكتمل تقرير الأسبوع الحالي")
+    project["status"] = "active"; path = dict(profile.career_path); path["project"] = project; profile.career_path = path
+    db.commit(); task = create_cycle_and_task(db, user.id)
+    return {"status": "active", "task_id": task.id}
 
 
 @router.get("/workspace")
@@ -170,24 +198,34 @@ def workspace(user: User = Depends(current_user), db: Session = Depends(get_db))
     active_task = next((task for task in tasks if task.status != TaskStatus.reviewed), tasks[0] if tasks else None)
     evals = list(db.scalars(select(Evaluation).where(Evaluation.task_id == active_task.id))) if active_task else []
     cycle = db.get(WorkCycle, active_task.cycle_id) if active_task else None
+    latest_report = db.scalar(select(WeeklyReport).where(WeeklyReport.user_id == user.id).order_by(WeeklyReport.created_at.desc()))
+    kickoff = db.scalar(select(Message).where(Message.user_id == user.id, Message.kind == "project_kickoff").order_by(Message.created_at.desc()))
+    completed_this_week = len([task for task in tasks if cycle and task.cycle_id == cycle.id and task.status == TaskStatus.reviewed])
     payload = {"profile": profile.extracted if profile else None, "career_path": profile.career_path if profile else None,
         "tasks": [{"id": t.id, "title": t.title, "brief": t.brief, "status": t.status, "criteria": t.acceptance_criteria, "difficulty": t.difficulty} for t in tasks],
-        "agents": [{"id": "manager", "name": "Manager", "status": "لديه تحديث" if unread else "متاح"}, {"id": "mentor", "name": "Mentor", "status": "متاح للمساعدة"}, {"id": "hr", "name": "HR", "status": "يراقب التقدم"}], "notifications": [{"id": m.id, "body": m.body, "created_at": m.created_at} for m in unread[:5]]}
-    payload.update({"evaluations": [{"agent": item.agent, "scores": item.scores, "rationale": item.rationale, "confidence": item.confidence} for item in evals],
-        "cycle": {"starts_at": cycle.starts_at, "ends_at": cycle.ends_at} if cycle else None, "path_revisions": profile.revisions if profile else []})
+        "agents": [{"id": "manager", "name": "Manager", "status": "لديه تحديث" if unread else "متاح"}, {"id": "senior", "name": "Senior", "status": "متاح للمساعدة"}, {"id": "hr", "name": "HR", "status": "يراقب التقدم"}], "notifications": [{"id": m.id, "body": m.body, "created_at": m.created_at} for m in unread[:5]]}
+    payload.update({"evaluations": [{"agent": item.agent, "scores": item.scores, "rationale": item.rationale, "confidence": item.confidence, "evidence": item.evidence} for item in evals],
+        "cycle": {"starts_at": cycle.starts_at, "ends_at": cycle.ends_at} if cycle else None, "path_revisions": profile.revisions if profile else [],
+        "project_status": ((profile.career_path or {}).get("project", {}).get("status", "ready") if profile else "ready"),
+        "project_overview": kickoff.body if kickoff else None, "completed_this_week": completed_this_week,
+        "performance_score": int((profile.career_path or {}).get("performance_score", 50)) if profile else 50,
+        "weekly_report": latest_report.report if latest_report else None})
     return payload
 
 
 @router.get("/agents/{agent}/messages")
 def messages(agent: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    if agent not in {"manager", "mentor", "hr"}: raise HTTPException(404, "الوكيل غير موجود")
+    if agent not in {"manager", "senior", "hr"}: raise HTTPException(404, "الوكيل غير موجود")
     rows = db.scalars(select(Message).where(Message.user_id == user.id, Message.agent == agent).order_by(Message.created_at))
     return [{"id": m.id, "sender": m.sender, "body": m.body, "kind": m.kind, "created_at": m.created_at} for m in rows]
 
 
 @router.post("/agents/{agent}/messages")
 def send_message(agent: str, data: ChatIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    if agent not in {"manager", "mentor", "hr"}: raise HTTPException(404, "الوكيل غير موجود")
+    if agent not in {"manager", "senior", "hr"}: raise HTTPException(404, "الوكيل غير موجود")
+    profile = db.scalar(select(CareerProfile).where(CareerProfile.user_id == user.id))
+    if ((profile.career_path or {}).get("project", {}).get("status") == "active") and agent != "senior":
+        raise HTTPException(403, "أثناء تنفيذ الأسبوع يكون تواصلك المباشر مع Senior فقط")
     db.add(Message(user_id=user.id, task_id=data.task_id, agent=agent, sender="user", body=data.body))
     db.flush()
     context = shared_agent_context(db, user.id, agent, data.task_id)
@@ -205,8 +243,8 @@ def change_status(task_id: str, data: StatusIn, user: User = Depends(current_use
     if data.status not in allowed.get(task.status, set()): raise HTTPException(409, "انتقال حالة غير مسموح")
     task.status = data.status
     if data.status == TaskStatus.in_progress:
-        db.add(Message(user_id=user.id, task_id=task.id, agent="manager", sender="agent", kind="status_update", body="بدأت المهمة. قبل التنفيذ تأكد أنك تستطيع شرح المطلوب ومعايير النجاح، واسألني عن أي غموض في النطاق."))
-        db.add(Message(user_id=user.id, task_id=task.id, agent="mentor", sender="system", kind="agent_sync", body="بدأ المستخدم تنفيذ المهمة. قدّم تلميحات متدرجة وسجّل نوع المساعدة دون تنفيذ الحل عنه."))
+        db.add(Message(user_id=user.id, task_id=task.id, agent="manager", sender="system", kind="agent_sync", body="بدأ Junior المهمة. سيشرف Senior على التنفيذ ويرفع تقريره الفني."))
+        db.add(Message(user_id=user.id, task_id=task.id, agent="senior", sender="agent", kind="status_update", body="بدأنا التنفيذ. قسّم المهمة إلى خطوة صغيرة، واشرح لي خطتك قبل كتابة الحل. سأعطيك تلميحًا إذا احتجت."))
         db.add(Message(user_id=user.id, task_id=task.id, agent="hr", sender="system", kind="agent_sync", body="بدأ المستخدم المهمة. راقب الاستمرارية والتواصل والاستجابة للملاحظات."))
     db.commit(); return {"status": task.status}
 
@@ -214,27 +252,43 @@ def change_status(task_id: str, data: StatusIn, user: User = Depends(current_use
 @router.post("/tasks/{task_id}/submit")
 def submit(task_id: str, data: SubmissionIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     task = owned_task(db, task_id, user)
-    if task.status not in {TaskStatus.in_progress, TaskStatus.todo}: raise HTTPException(409, "المهمة ليست جاهزة للتسليم")
-    try: pinned = pin_repository(str(data.github_url))
-    except ValueError as e: raise HTTPException(422, str(e))
-    submission = Submission(task_id=task.id, github_url=str(data.github_url), commit_sha=pinned["sha"], summary=data.summary, challenges=data.challenges)
-    task.status = TaskStatus.under_review; db.add(submission); db.commit(); evaluate_task(db, task)
-    return {"submission_id": submission.id, "commit_sha": pinned["sha"], "status": task.status}
+    if task.status not in {TaskStatus.in_progress, TaskStatus.todo, TaskStatus.discussion}: raise HTTPException(409, "المهمة ليست جاهزة للتسليم")
+    if data.github_url:
+        try: pinned = pin_repository(str(data.github_url))
+        except ValueError as e: raise HTTPException(422, str(e))
+        source_url, sha, kind, content = str(data.github_url), pinned["sha"], "github", pinned["url"]
+    else:
+        content = (data.code or "").strip()
+        source_url, sha, kind = "internal://code", hashlib.sha256(content.encode()).hexdigest(), "inline_code"
+    submission = Submission(task_id=task.id, github_url=source_url, commit_sha=sha, summary=data.summary, challenges=data.challenges)
+    db.add(submission); db.flush()
+    db.add(SubmissionArtifact(submission_id=submission.id, kind=kind, language=data.language, content=content))
+    db.execute(delete(Evaluation).where(Evaluation.task_id == task.id))
+    task.status = TaskStatus.under_review; db.commit(); evaluations = evaluate_task(db, task)
+    decision = next((item for item in evaluations[0].evidence if item.get("type") == "decision"), {"outcome": "improve"})
+    return {"submission_id": submission.id, "commit_sha": sha, "status": task.status, "outcome": decision["outcome"]}
 
 
 @router.post("/tasks/{task_id}/complete-discussion")
 def complete_discussion(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     task = owned_task(db, task_id, user)
     agents = set(db.scalars(select(Evaluation.agent).where(Evaluation.task_id == task.id)))
-    if agents != {"manager", "mentor", "hr"}: raise HTTPException(409, "لم تكتمل التقييمات")
+    if agents != {"senior"}: raise HTTPException(409, "لم تكتمل مراجعة Senior")
     submission = db.scalar(select(Submission).where(Submission.task_id == task.id).order_by(Submission.created_at.desc()))
     if not submission: raise HTTPException(409, "لا يوجد تسليم مثبت")
-    discussed = set(db.scalars(select(Message.agent).where(Message.task_id == task.id, Message.sender == "user", Message.created_at >= submission.created_at, Message.agent.in_(["manager", "mentor"]))))
-    missing = {"manager", "mentor"} - discussed
-    if missing: raise HTTPException(409, "ناقش التسليم مع المدير والمرشد قبل إغلاق المهمة")
+    evaluation = db.scalar(select(Evaluation).where(Evaluation.task_id == task.id, Evaluation.agent == "senior"))
+    decision = next((item.get("outcome") for item in (evaluation.evidence or []) if item.get("type") == "decision"), "improve") if evaluation else "improve"
+    discussed = set(db.scalars(select(Message.agent).where(Message.task_id == task.id, Message.sender == "user", Message.created_at >= submission.created_at, Message.agent == "senior")))
+    if decision == "improve" and "senior" not in discussed: raise HTTPException(409, "ناقش مراجعة التسليم مع Senior قبل إغلاق المهمة")
     task.status = TaskStatus.reviewed; db.commit()
+    cycle = db.get(WorkCycle, task.cycle_id)
+    completed = len(list(db.scalars(select(Task).where(Task.cycle_id == cycle.id, Task.status == TaskStatus.reviewed))))
+    cycle_now = datetime.now(cycle.ends_at.tzinfo) if cycle.ends_at.tzinfo else datetime.now()
+    if completed >= 5 or cycle.ends_at <= cycle_now:
+        report = weekly_report(db, cycle)
+        return {"status": task.status, "next_task_id": None, "weekly_report": report.report}
     next_task = create_cycle_and_task(db, user.id, task.organization_id)
-    return {"status": task.status, "next_task_id": next_task.id}
+    return {"status": task.status, "next_task_id": next_task.id, "completed_this_week": completed}
 
 
 @router.get("/tasks/{task_id}/evaluations")
@@ -267,12 +321,6 @@ def add_knowledge(org_id: str, data: KnowledgeIn, user: User = Depends(current_u
     if not data.attested_synthetic: raise HTTPException(422, "يجب تأكيد أن البيانات وهمية أو منزوعة الهوية")
     doc = KnowledgeDocument(organization_id=org_id, name=data.name, content=data.content, attested_synthetic=True)
     db.add(doc); db.commit(); db.refresh(doc); return {"id": doc.id, "status": "indexed", "source": doc.name}
-
-
-def recruiter_org(db: Session, org_id: str, user: User) -> Organization:
-    org = db.get(Organization, org_id)
-    if not org or org.owner_id != user.id: raise HTTPException(404, "الشركة غير موجودة")
-    return org
 
 
 @router.post("/campaigns")

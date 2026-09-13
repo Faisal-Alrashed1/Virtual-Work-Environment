@@ -4,10 +4,10 @@ import {FormEvent, useEffect, useState} from "react";
 import {api} from "@/lib/api";
 
 type Msg = {id?: string; sender: string; body: string; kind?: string};
-const names: Record<string, string> = {manager: "Manager · المدير", mentor: "Mentor · المرشد", hr: "HR · الموارد البشرية"};
+const names: Record<string, string> = {manager: "Manager · المدير", senior: "Senior · المرشد", hr: "HR · الموارد البشرية"};
 const descriptions: Record<string, string> = {
   manager: "يفهم المطلوب، يناقش قراراتك، ويدير المهمة التالية",
-  mentor: "يشرح ويلمح أثناء العمل، ثم يراجع الكود والمنطق",
+  senior: "يشرح ويلمح أثناء العمل، ثم يراجع الكود والمنطق",
   hr: "يراقب التواصل والمهنية والتطور ويجهز التقرير",
 };
 

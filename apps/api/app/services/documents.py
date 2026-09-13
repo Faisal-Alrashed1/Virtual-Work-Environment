@@ -18,7 +18,8 @@ def extract_text(data: bytes, content_type: str) -> str:
 def safe_save(root: str, user_id: str, filename: str, data: bytes) -> str:
     folder = Path(root) / user_id
     folder.mkdir(parents=True, exist_ok=True)
-    safe = Path(filename).name.replace(" ", "_")
+    suffix = Path(filename).suffix.lower()
+    safe = f"cv{suffix}"
     path = folder / safe
     path.write_bytes(data)
     return str(path)

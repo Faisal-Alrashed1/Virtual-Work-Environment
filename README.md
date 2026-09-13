@@ -1,84 +1,100 @@
-# Virtual Work Environment (Venv)
+# Virtual Work Environment
 
-An AI-powered work simulation platform for students and recent graduates. It analyzes a CV, evaluates the user's level through 10 questions, creates a personalized career path, and assigns one task at a time through three connected AI agents: Manager, Mentor, and HR.
+An AI-powered workplace simulation for students and recent graduates. The user joins as a Junior Web Developer and works with three focused AI agents:
+
+- **Senior:** supervises the Junior, splits the project into tasks, reviews code, and gives progressive hints.
+- **Manager:** introduces the project and evaluates weekly technical performance from the Senior's report.
+- **HR:** evaluates professional behavior and produces the final weekly evaluation.
+
+Phase 1 focuses on Web Development. Difficulty adapts to demonstrated weekly performance. Companies can also create controlled candidate environments using synthetic or anonymized knowledge.
+
+## Structure
+
+```text
+apps/api/              Python + FastAPI backend
+  app/api/             HTTP endpoints
+  app/core/            configuration, database, security
+  app/models/          database tables
+  app/schemas/         validated requests
+  app/services/        AI, GitHub, CV, tasks, reports
+  tests/               backend tests
+apps/web/              Next.js frontend
+  app/                 pages and styles
+  components/          reusable UI
+  lib/                 API client
+run.py                 starts both services
+```
 
 ## Requirements
 
-- Docker Desktop
+- Python 3.11+
+- Node.js 20+
 - Git
-- An OpenAI API key (optional; the app uses demo responses without one)
+- DeepSeek API key (optional; demo responses work without it)
 
-## First-Time Setup
+Docker is not required.
+
+## First setup
 
 ```bash
-git clone https://github.com/Faisal-Alrashed1/Virtual-Work-Environment.git
-cd Virtual-Work-Environment
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r apps/api/requirements.txt
+cd apps/web && npm install && cd ../..
 cp .env.example .env
-docker compose up --build
 ```
 
-To enable real AI responses, open `.env` and add your key:
+DeepSeek is the platform's only AI provider. Put the key only in `.env`:
 
 ```env
-OPENAI_API_KEY=your_key_here
+DEEPSEEK_API_KEY=your_key_here
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
 ```
 
-The `.env` file is ignored by Git and will not be uploaded. Never place a real key in `.env.example` or in the source code.
+Create a private JWT secret using `python -c "import secrets; print(secrets.token_urlsafe(48))"` and put it in `JWT_SECRET`. Never place secrets in source code or `.env.example`.
 
-When Docker displays `Ready`, open:
+## Run everything
 
-- Web app: http://localhost:3000
+```bash
+python3 run.py
+```
+
+- Platform: http://localhost:3000
 - API documentation: http://localhost:8000/docs
 
-## Common Commands
+Press `Control+C` to stop both services.
+
+## Run separately
+
+Backend terminal:
 
 ```bash
-# Start in the background
-docker compose up -d
-
-# Check service status
-docker compose ps
-
-# View live logs
-docker compose logs -f
-
-# Stop the project
-docker compose down
-
-# Rebuild after code changes
-docker compose up -d --build
+source .venv/bin/activate
+cd apps/api
+PYTHONPATH=. python -m uvicorn app.main:app --reload --port 8000
 ```
 
-On macOS, Docker Desktop must be open and show `Engine running` before you run these commands.
-
-## How to Try the Platform
-
-1. Create an account and upload a PDF or DOCX CV (maximum 8 MB).
-2. Answer the 10 level-assessment questions and describe your learning goal.
-3. Generate your career path and start the task assigned by the Manager.
-4. Ask the Mentor for guidance, submit your GitHub link, and discuss the result.
-5. Review the independent Manager, Mentor, and HR evaluations, then continue to the next task.
-
-## Technology
-
-- `apps/web`: Next.js and React frontend.
-- `apps/api`: FastAPI and Python backend, AI agents, and task lifecycle.
-- `db`: PostgreSQL with pgvector, running in Docker.
-- `infra`: Database initialization files.
-
-## Run Tests
+Frontend terminal:
 
 ```bash
-docker compose exec api sh -lc "PYTHONPATH=/app pytest -q"
+cd apps/web
+npm run dev
 ```
 
-## Troubleshooting
+## Verify
 
-- `docker: command not found`: Open Docker Desktop, then reopen Terminal.
-- `connection refused`: Run `docker compose ps` and confirm that `web`, `api`, and `db` are running.
-- `Load failed`: Run `docker compose logs api` and verify the values in `.env`.
-- After changing the API key, run `docker compose up -d --force-recreate api`.
+```bash
+source .venv/bin/activate
+PYTHONPATH=apps/api pytest -q apps/api/tests
+cd apps/web && npm run build
+```
 
-## Security
+## Database and security
 
-Local environment files, uploaded CVs, database files, build output, dependencies, and logs are excluded from Git. Do not commit real credentials or sensitive production data.
+The MVP uses the local `venv.db` SQLite database, so no database server is needed. SQLAlchemy keeps the data layer replaceable if PostgreSQL is required later.
+
+- Never commit `.env`, `venv.db`, uploaded CVs, real company data, or API keys.
+- Company knowledge must be synthetic or anonymized.
+- User and company resources are checked against the authenticated owner.
+- AI evaluations must cite evidence and never make the final hiring decision.

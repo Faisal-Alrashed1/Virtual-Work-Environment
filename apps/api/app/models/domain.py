@@ -93,6 +93,17 @@ class Submission(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class SubmissionArtifact(Base):
+    """The submitted code is stored separately so attempts remain immutable."""
+    __tablename__ = "submission_artifacts"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
+    submission_id: Mapped[str] = mapped_column(ForeignKey("submissions.id"), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String)  # inline_code or github
+    language: Mapped[str] = mapped_column(String, default="text")
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class Message(Base):
     __tablename__ = "messages"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
