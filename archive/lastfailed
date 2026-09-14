@@ -1,0 +1,3 @@
+{
+  "apps/api/tests/test_api.py::TestClient": true
+}

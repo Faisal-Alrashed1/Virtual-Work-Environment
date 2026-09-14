@@ -1,0 +1,3 @@
+const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export function authToken(){return typeof window==="undefined"?"":localStorage.getItem("venv_token")||""}
+export async function api<T>(path:string,init:RequestInit={}):Promise<T>{const headers=new Headers(init.headers);if(!(init.body instanceof FormData))headers.set("Content-Type","application/json");const token=authToken();if(token)headers.set("Authorization",`Bearer ${token}`);const response=await fetch(`${BASE}${path}`,{...init,headers});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.detail||"تعذر إكمال العملية")}return response.json()}
