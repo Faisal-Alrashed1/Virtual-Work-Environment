@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["file:///Users/fyslalrashd/Desktop/virtual-work-environment-ai-agent-x20/frontend/app/layout.tsx"],"sourcesContent":["import type {Metadata} from \"next\";\nimport \"./globals.css\";\nimport \"./product.css\";\nexport const metadata:Metadata={title:\"Venv | بيئة عمل افتراضية\",description:\"تدرّب على وظيفتك الأولى مع فريق AI\"};\nexport default function Layout({children}:{children:React.ReactNode}){return <html lang=\"ar\" dir=\"rtl\"><body><div className=\"noise\"/>{children}</body></html>}\n"],"names":["metadata","title","description","Layout","children","lang","dir","className"],"mappings":";;;;;;;;;;AAGO,MAAMA,WAAkB;IAACC,OAAM;IAA2BC,aAAY;AAAoC;AAClG,SAASC,OAAO,EAACC,QAAQ,EAA4B;IAAE,qBAAO,8OAAC;QAAKC,MAAK;QAAKC,KAAI;kBAAM,cAAA,8OAAC;;8BAAK,8OAAC;oBAAIC,WAAU;;;;;;gBAAUH;;;;;;;;;;;;AAAuB"}},
+    {"offset": {"line": 52, "column": 0}, "map": {"version":3,"sources":["file:///Users/fyslalrashd/Desktop/virtual-work-environment-ai-agent-x20/frontend/node_modules/next/src/server/route-modules/app-page/vendored/rsc/react-jsx-dev-runtime.ts"],"sourcesContent":["module.exports = (\n  require('../../module.compiled') as typeof import('../../module.compiled')\n).vendored['react-rsc']!.ReactJsxDevRuntime\n"],"names":["module","exports","require","vendored","ReactJsxDevRuntime"],"mappings":"AAAAA,OAAOC,OAAO,GACZC,QAAQ,4HACRC,QAAQ,CAAC,YAAY,CAAEC,kBAAkB","ignoreList":[0]}}]
+}
