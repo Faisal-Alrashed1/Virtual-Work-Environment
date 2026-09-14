@@ -1,12 +1,2 @@
-.env
-.venv/
-__pycache__/
-.pytest_cache/
-node_modules/
-.next/
-coverage/
-uploads/
-*.pyc
-.DS_Store
-venv.db
-*.log
+# Created by venv; see https://docs.python.org/3/library/venv.html
+*
