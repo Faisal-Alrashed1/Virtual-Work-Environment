@@ -1,0 +1,215 @@
+@import "tailwindcss";
+
+/*
+  Venv design tokens — see DESIGN.md for the full rationale.
+  The home board is a floor plan of a shared workplace, so the whole
+  system borrows from technical/architectural drawings: hairline
+  borders, a faint grid, tick-mark rulers — instead of the rounded
+  card + soft-shadow SaaS default.
+
+  Two themes share this one token set — dark is the :root default,
+  light overrides it under [data-theme="light"] (set on <html> by the
+  inline anti-flash script in layout.tsx, then kept in sync by
+  lib/theme.tsx). Every component already reads color through these
+  variables (or the Tailwind utilities in @theme inline below that
+  alias them), so the theme switch is a token swap, not a per-component
+  change — see DESIGN.md's "Light mode" section for which usages
+  needed a second, text-legible accent variant and why.
+*/
+:root {
+  color-scheme: dark;
+
+  --bg-base: #10161d;
+  --bg-surface: #182029;
+  --bg-surface-raised: #1f2933;
+
+  --line-grid: #1c2530;
+  --border: #2b3946;
+  --border-strong: #3b4c5c;
+
+  --text-primary: #edeff2;
+  --text-secondary: #8a97a6;
+  --text-muted: #5c6773;
+
+  --accent: #e8a33d;
+  --accent-strong: #f3b65a;
+  --accent-text: #3d2a0c;
+  /* Same amber as --accent in dark mode (already ~8:1 against
+     bg-base) — kept as a separate token so light mode can deepen just
+     the bare-text/icon uses of accent without touching button fills.
+     See DESIGN.md. */
+  --accent-ink: #e8a33d;
+
+  /* Real API calls can now fail (bad login, server down, etc.) — one
+     muted color for error text, kept desaturated to match the palette
+     rather than a stock bright red. */
+  --danger: #d9765f;
+
+  --agent-manager: #e8a33d;
+  --agent-mentor: #4fb286;
+  --agent-hr: #a78bfa;
+
+  --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+}
+
+/* Arabic has no real monospace tradition and Space Grotesk/JetBrains
+   Mono don't cover Arabic glyphs at all, so [dir="rtl"] swaps the body
+   font to IBM Plex Sans Arabic — chosen over the friendlier, rounder
+   options (Cairo, Tajawal) because it's part of a coordinated
+   multi-script superfamily built for technical/corporate contexts,
+   which is the same "geometric, a little technical" reasoning DESIGN.md
+   gives for Space Grotesk. Mono-styled Arabic text (short labels like
+   "نقاط القوة") still requests JetBrains Mono first; the browser's own
+   glyph-level fallback covers the Arabic characters it doesn't have —
+   not a perfect visual match, but a normal, unbroken fallback, not
+   worth a second Arabic mono font for a handful of short captions. */
+[dir="rtl"] {
+  --font-sans: "IBM Plex Sans Arabic", "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+}
+
+/*
+  Light mode — deliberately not just an inverted dark theme. The
+  "blueprint" idea actually started life as light drafting paper with
+  blue linework (a real blueprint is a light print, not a dark one),
+  so this palette leans into that: cool off-white paper, soft
+  blue-gray grid and hairlines, ink-dark text. Same hierarchy logic as
+  dark mode (base -> surface -> raised gets progressively more
+  "present"), just running toward white instead of away from black.
+
+  Accent, accent-strong, and accent-text stay identical to dark mode —
+  the amber button (bg-accent + text-accent-text) is a self-contained
+  pair that already reads fine on any page background. Only
+  --accent-ink and the three agent identity colors get deepened here,
+  because those are used as bare text/icon/dot color directly against
+  the page, where the brighter dark-mode amber/green/violet would
+  wash out against white (~2:1-2.7:1) instead of the ~5:1-6:1 these
+  deeper shades give.
+*/
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-base: #eef1f5;
+  --bg-surface: #f8fafc;
+  --bg-surface-raised: #ffffff;
+
+  --line-grid: #dce4ec;
+  --border: #d7dee6;
+  --border-strong: #aebac6;
+
+  --text-primary: #151b22;
+  --text-secondary: #4c5964;
+  --text-muted: #7c8791;
+
+  --accent: #e8a33d;
+  --accent-strong: #f3b65a;
+  --accent-text: #3d2a0c;
+  --accent-ink: #9c5f0e;
+
+  --danger: #b8432a;
+
+  --agent-manager: #9c5f0e;
+  --agent-mentor: #22815a;
+  --agent-hr: #6b46c1;
+}
+
+@theme inline {
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-surface-raised: var(--bg-surface-raised);
+  --color-line-grid: var(--line-grid);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-text: var(--accent-text);
+  --color-accent-ink: var(--accent-ink);
+  --color-danger: var(--danger);
+  --color-agent-manager: var(--agent-manager);
+  --color-agent-mentor: var(--agent-mentor);
+  --color-agent-hr: var(--agent-hr);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+/* The one deliberate cross-fade: everything using these color
+   properties eases into the new theme instead of snapping, so
+   flipping the toggle reads as a considered transition rather than a
+   flicker. Zero-specificity :where() means any element's own
+   transition utility (button hovers etc.) still wins outright —
+   this only fills in a default for elements that don't set one. */
+:where(
+    body, main, header, footer, nav, section, article, aside, div, span,
+    a, button, input, textarea, select, label, p, h1, h2, h3, h4, li, svg
+  ) {
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease,
+    color 0.25s ease,
+    fill 0.25s ease;
+}
+
+/* Faint blueprint grid, used behind the home board and other full-bleed
+   surfaces. Kept subtle on purpose — it's texture, not decoration. */
+.bg-blueprint-grid {
+  background-image:
+    linear-gradient(var(--line-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* A thin scrollbar matching the palette, for internally-scrolling panels
+   (the workspace rail, task detail, meeting thread, detail drawer). The
+   default OS scrollbar is a thick light-gray bar that clashes against this
+   dark, hairline-border system. Firefox/modern Chromium via
+   scrollbar-width+color; Safari/older Chromium via -webkit- pseudos.
+   (Restored here: referenced across the app but missing from the merged
+   globals.css — an undefined class silently fell back to the OS bar.) */
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.thin-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 3px;
+}
+
+/* Overlay variant: the thumb floats over content with an inset, so it
+   never stacks against an adjacent border into a heavy double line (the
+   board's left column against its divider). Same palette, translucent
+   until hover. */
+.overlay-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--border-strong) 55%, transparent)
+    transparent;
+}
+.overlay-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+.overlay-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.overlay-scrollbar::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--border-strong) 55%, transparent);
+  border-radius: 5px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.overlay-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--border-strong);
+}

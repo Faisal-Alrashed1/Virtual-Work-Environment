@@ -1,0 +1,189 @@
+"use client";
+
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import en from "./en";
+import ar from "./ar";
+import type { Dictionary } from "./en";
+import { AGENT_COLOR_VAR, type AgentId, type AgentMeta } from "@/lib/agents";
+import { STATUS_ORDER, type TaskStatus } from "@/lib/tasks";
+import { SELECTABLE_ONLY_TRACKS, TRACK_ORDER } from "@/lib/tracks";
+import type { ApiTrack } from "@/lib/api";
+import type { ExtraAgent } from "@/lib/team";
+
+export type Locale = "en" | "ar";
+
+const STORAGE_KEY = "venv-locale";
+const DICTS: Record<Locale, Dictionary> = { en, ar };
+const DIR: Record<Locale, "ltr" | "rtl"> = { en: "ltr", ar: "rtl" };
+
+/** A leaf value in the dictionary: a plain string, or an {one, other}
+ * pair for count-dependent text. See en.ts's header comment for why
+ * this two-form shape was chosen over full plural-rule support. */
+type PluralForm = { one: string; other: string };
+
+function isPluralForm(v: unknown): v is PluralForm {
+  return typeof v === "object" && v !== null && "one" in v && "other" in v;
+}
+
+function getPath(dict: Record<string, unknown>, path: string): unknown {
+  return path
+    .split(".")
+    .reduce<unknown>(
+      (node, key) =>
+        node && typeof node === "object" ? (node as Record<string, unknown>)[key] : undefined,
+      dict
+    );
+}
+
+function interpolate(str: string, vars?: Record<string, string | number>): string {
+  if (!vars) return str;
+  return str.replace(/\{(\w+)\}/g, (match, key: string) =>
+    key in vars ? String(vars[key]) : match
+  );
+}
+
+interface LocaleContextValue {
+  locale: Locale;
+  dir: "ltr" | "rtl";
+  toggleLocale: () => void;
+  /** Plain string lookup by dot path, e.g. t("board.welcomeBack"). Falls
+   * back to the path itself if a key is somehow missing at runtime, so a
+   * gap is visibly wrong rather than silently blank. */
+  t: (path: string, vars?: Record<string, string | number>) => string;
+  /** Count-aware lookup for a {one, other} pair, e.g.
+   * tPlural("statRow.acrossReviews", count, { n: count }). */
+  tPlural: (path: string, count: number, vars?: Record<string, string | number>) => string;
+  /** Raw structural data (arrays of objects, etc.) that isn't a single
+   * translated string — the landing page's cycle steps, orientation's
+   * how-it-works cards. Not interpolated; consumers read fields off it
+   * directly. */
+  tRaw: <T,>(path: string) => T;
+}
+
+const LocaleContext = createContext<LocaleContextValue | null>(null);
+
+/** Mirrors lib/theme.tsx's readAppliedTheme: reads whatever the anti-
+ * flash inline script (layout.tsx's <head>) already applied to
+ * <html lang/dir> before this ever runs, so first client render always
+ * matches what's already on screen. */
+function readAppliedLocale(): Locale {
+  if (typeof document === "undefined") return "en";
+  return document.documentElement.getAttribute("lang") === "ar" ? "ar" : "en";
+}
+
+export function LocaleProvider({ children }: { children: ReactNode }) {
+  const [locale, setLocale] = useState<Locale>(readAppliedLocale);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("lang", locale);
+    document.documentElement.setAttribute("dir", DIR[locale]);
+    window.localStorage.setItem(STORAGE_KEY, locale);
+  }, [locale]);
+
+  function toggleLocale() {
+    setLocale((l) => (l === "en" ? "ar" : "en"));
+  }
+
+  function t(path: string, vars?: Record<string, string | number>): string {
+    const raw = getPath(DICTS[locale], path);
+    if (typeof raw !== "string") return path;
+    return interpolate(raw, vars);
+  }
+
+  function tPlural(
+    path: string,
+    count: number,
+    vars?: Record<string, string | number>
+  ): string {
+    const raw = getPath(DICTS[locale], path);
+    if (!isPluralForm(raw)) return path;
+    return interpolate(count === 1 ? raw.one : raw.other, vars);
+  }
+
+  function tRaw<T>(path: string): T {
+    return getPath(DICTS[locale], path) as T;
+  }
+
+  return (
+    <LocaleContext.Provider value={{ locale, dir: DIR[locale], toggleLocale, t, tPlural, tRaw }}>
+      {children}
+    </LocaleContext.Provider>
+  );
+}
+
+export function useLocale(): LocaleContextValue {
+  const ctx = useContext(LocaleContext);
+  if (!ctx) throw new Error("useLocale must be used within a LocaleProvider");
+  return ctx;
+}
+
+/** The three default agents' name/role/description, translated for the
+ * current locale. A hook (not a plain export) because the text is
+ * locale-dependent — call it once at the top of a component, same as
+ * any other hook, then pass the result down to any plain helper (like
+ * resolveAgentDisplay below) that needs it inside a loop. */
+export function useAgents(): Record<AgentId, AgentMeta> {
+  const { t } = useLocale();
+  function build(id: AgentId): AgentMeta {
+    return {
+      id,
+      name: t(`agents.${id}.name`),
+      role: t(`agents.${id}.role`),
+      description: t(`agents.${id}.description`),
+      colorVar: AGENT_COLOR_VAR[id],
+    };
+  }
+  return {
+    manager: build("manager"),
+    mentor: build("mentor"),
+    hr: build("hr"),
+  };
+}
+
+export interface AgentDisplay {
+  name: string;
+  role: string;
+  colorVar: string | null;
+}
+
+/** Plain function, not a hook — safe to call inside a .map() over a
+ * message list or agent roster. Takes the already-resolved `agents`
+ * dict (from useAgents(), called once by the component) rather than
+ * looking anything up itself. Looks up an agent id that might be one
+ * of the fixed default three or one of the graduate's extra roster
+ * agents — the catalog can grow, so this never assumes a closed set. */
+export function resolveAgentDisplay(
+  id: string,
+  agents: Record<AgentId, AgentMeta>,
+  extraAgents: ExtraAgent[]
+): AgentDisplay {
+  if (id in agents) {
+    const m = agents[id as AgentId];
+    return { name: m.name, role: m.role, colorVar: m.colorVar };
+  }
+  const extra = extraAgents.find((a) => a.id === id);
+  return { name: extra?.name ?? id, role: extra?.description ?? "", colorVar: null };
+}
+
+/** The four task-status labels (To do / In progress / Submitted /
+ * Reviewed), translated. */
+export function useStatusLabels(): Record<TaskStatus, string> {
+  const { t } = useLocale();
+  return Object.fromEntries(
+    STATUS_ORDER.map((s) => [s, t(`taskStatus.${s}`)])
+  ) as Record<TaskStatus, string>;
+}
+
+/** The seven track labels, translated, keyed by the backend's ApiTrack
+ * enum value. */
+export function useTrackLabels(): Record<ApiTrack, string> {
+  const { t } = useLocale();
+  return Object.fromEntries(
+    TRACK_ORDER.map((tr) => [tr, t(`tracks.${tr}`)])
+  ) as Record<ApiTrack, string>;
+}
+
+// Re-exported so call sites that only need the six selectable tracks
+// (onboarding's track-override dropdown) don't also need to import
+// from lib/tracks directly.
+export { SELECTABLE_ONLY_TRACKS };
