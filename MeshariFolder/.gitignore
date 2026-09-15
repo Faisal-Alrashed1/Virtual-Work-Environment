@@ -1,0 +1,27 @@
+# --- Python (backend) ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.db
+.pytest_cache/
+backend/uploads/
+
+# --- Node (frontend, once it exists) ---
+node_modules/
+dist/
+build/
+.next/
+
+# --- Secrets ---
+.env
+.env.local
+
+# --- Editor / OS ---
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
