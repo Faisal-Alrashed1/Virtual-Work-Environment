@@ -14,8 +14,8 @@ graduate gets one clear "here's what matters most" rather than being left
 to reconcile four voices themselves.
 
 Kept deliberately bounded: one pass around the table (not a free-running
-loop), specialists on the small model (quick, cheap takes), the Manager's
-synthesis on the main model (it's the judgment call that ties it
+loop), specialists on the small tier (quick, cheap takes), the Manager's
+synthesis on the main tier (it's the judgment call that ties it
 together). Each agent's turn is best-effort — one failing is skipped, the
 rest of the table carries on.
 """
@@ -25,7 +25,6 @@ from app.agents import manager
 from app.agents.github_client import fetch_repo_context
 from app.agents.llm_client import call_agentic
 from app.agents.meeting import PERSONA
-from app.config import settings
 from app.models import (
     AgentCatalog,
     AgentType,
@@ -37,8 +36,6 @@ from app.models import (
     UserAgent,
 )
 
-# The specialists who take part in the roundtable — same set that
-# co-reviews (Career Coach stays meeting-room-only, see co_reviewers.py).
 ROUNDTABLE_AGENTS = {
     AgentType.SECURITY_REVIEWER,
     AgentType.DATA_REVIEWER,
@@ -128,15 +125,13 @@ def run_roundtable(db: Session, user: User, task: Task) -> list[TaskMessage]:
     submission = _submission_context(task)
     mentor_text = _mentor_review_text(task)
 
-    # The running transcript each next speaker sees — starts with the
-    # Mentor's review, grows as each specialist adds their turn.
     transcript: list[str] = [mentor_text]
     posted: list[TaskMessage] = []
 
     for agent_type in active:
         discussion_so_far = "\n\n".join(transcript)
         try:
-            response = call_agentic(
+            reply = call_agentic(
                 system=PERSONA[agent_type] + _SPECIALIST_FRAMING,
                 messages=[
                     {
@@ -148,26 +143,22 @@ def run_roundtable(db: Session, user: User, task: Task) -> list[TaskMessage]:
                     }
                 ],
                 tools=[],
-                model=settings.small_llm_model,
+                tier="small",
                 max_tokens=400,
             )
         except Exception:
             continue
-        text = next(
-            (b.text for b in response.content if b.type == "text" and b.text), None
-        )
+        text = reply.text
         if not text:
             continue
         posted.append(_post(db, task, agent_type, text))
-        # Label the turn in the transcript so later speakers know who said what.
         name = PERSONA[agent_type].split(" at Venv")[0].replace("You are the ", "")
         transcript.append(f"{name}:\n{text}")
 
-    # Manager synthesis — only if at least one specialist actually spoke.
     if posted:
         discussion = "\n\n".join(transcript)
         try:
-            response = call_agentic(
+            reply = call_agentic(
                 system=manager.SYSTEM_PROMPT + _MANAGER_SYNTHESIS_FRAMING,
                 messages=[
                     {
@@ -176,12 +167,10 @@ def run_roundtable(db: Session, user: User, task: Task) -> list[TaskMessage]:
                     }
                 ],
                 tools=[],
-                model=settings.llm_model,
+                tier="main",
                 max_tokens=500,
             )
-            text = next(
-                (b.text for b in response.content if b.type == "text" and b.text), None
-            )
+            text = reply.text
             if text:
                 posted.append(_post(db, task, AgentType.MANAGER, text))
         except Exception:

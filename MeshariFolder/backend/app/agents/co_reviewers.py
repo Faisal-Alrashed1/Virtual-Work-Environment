@@ -11,7 +11,7 @@ Career Coach is deliberately not part of this: resume/interview
 coaching doesn't fit a per-task code review the way security, data, and
 infra concerns do. It stays meeting-room-only (meeting.py).
 
-Uses call_agentic (plain text, no tools) on the small model — these are
+Uses call_agentic (plain text, no tools) on the small tier — these are
 quick specialty comments, not the primary judgment call the Mentor
 already made, same reasoning as the onboarding graph's model routing
 (docs/STAGE2_ONBOARDING_FLOW.md).
@@ -21,11 +21,8 @@ from sqlalchemy.orm import Session
 from app.agents.github_client import fetch_repo_context
 from app.agents.llm_client import call_agentic
 from app.agents.meeting import PERSONA
-from app.config import settings
 from app.models import AgentCatalog, AgentType, SenderType, Task, TaskMessage, User, UserAgent
 
-# Which optional agents actually review a submission. Career Coach is
-# excluded on purpose — see module docstring.
 CO_REVIEW_AGENTS = {AgentType.SECURITY_REVIEWER, AgentType.DATA_REVIEWER, AgentType.DEVOPS}
 
 _FRAMING = (
@@ -75,18 +72,16 @@ def run_co_reviews(db: Session, user: User, task: Task) -> list[TaskMessage]:
     posted: list[TaskMessage] = []
     for agent_type in active:
         try:
-            response = call_agentic(
+            reply = call_agentic(
                 system=PERSONA[agent_type] + _FRAMING,
                 messages=[{"role": "user", "content": context}],
                 tools=[],
-                model=settings.small_llm_model,
+                tier="small",
                 max_tokens=400,
             )
         except Exception:
             continue
-        text = next(
-            (b.text for b in response.content if b.type == "text" and b.text), None
-        )
+        text = reply.text
         if not text:
             continue
         message = TaskMessage(

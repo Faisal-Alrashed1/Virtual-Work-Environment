@@ -253,19 +253,16 @@ def respond_in_thread(db: Session, task: Task, user: User) -> TaskMessage:
         + f"\n\nCurrent task: {task.title} — {task.description}\n"
         + f"Status: {task.status.value}.\n{_cv_context(user)}"
     )
-    response = call_agentic(
+    reply = call_agentic(
         system=system,
         messages=history or [{"role": "user", "content": "(no messages yet)"}],
         tools=[POST_MESSAGE_TOOL],
     )
 
-    content = None
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "post_message":
-            content = block.input["content"]
-        elif block.type == "text" and block.text:
-            content = block.text
-    content = content or "Got it — keep going, and let me know if you get stuck."
+    content = next(
+        (c.input["content"] for c in reply.tool_calls if c.name == "post_message"), None
+    )
+    content = content or reply.text or "Got it — keep going, and let me know if you get stuck."
 
     message = TaskMessage(
         task_id=task.id,
