@@ -12,91 +12,108 @@ so a graduate can close the tab mid-onboarding and pick up where they
 left off. The router endpoints that drive this from the frontend are the
 next branch; this module only owns the graph itself.
 """
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import interrupt
 
-from app.agents.graph.models import small_model
+from app.agents.graph.models import small_model_chain
 from app.agents.graph.state import OnboardingState
+from app.agents.llm_client import ALL_PROVIDERS_FAILED, FAILOVER_EXCEPTIONS
 from app.models import TrackEnum
 
 QUESTIONS_TOOL = {
-    "name": "generate_questions",
-    "description": (
-        "Propose 2-4 short follow-up questions about whatever this CV "
-        "doesn't cover well — skill depth, project experience, gaps. "
-        "Each should be answerable in a sentence or two. If the CV is "
-        "already thorough, propose fewer, more targeted questions rather "
-        "than padding to 4."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "questions": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 4,
-                "items": {"type": "string"},
-            }
+    "type": "function",
+    "function": {
+        "name": "generate_questions",
+        "description": (
+            "Propose 2-4 short follow-up questions about whatever this CV "
+            "doesn't cover well — skill depth, project experience, gaps. "
+            "Each should be answerable in a sentence or two. If the CV is "
+            "already thorough, propose fewer, more targeted questions rather "
+            "than padding to 4."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "questions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "items": {"type": "string"},
+                }
+            },
+            "required": ["questions"],
         },
-        "required": ["questions"],
     },
 }
 
 _TRACK_VALUES = [t.value for t in TrackEnum if t != TrackEnum.JUNIOR_DEV]
 
 TRACK_TOOL = {
-    "name": "suggest_track",
-    "description": "Suggest the IT major/track that best fits this graduate.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "track": {"type": "string", "enum": _TRACK_VALUES},
-            "reasoning": {
-                "type": "string",
-                "description": "One or two sentences, shown to the graduate alongside the suggestion.",
+    "type": "function",
+    "function": {
+        "name": "suggest_track",
+        "description": "Suggest the IT major/track that best fits this graduate.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "track": {"type": "string", "enum": _TRACK_VALUES},
+                "reasoning": {
+                    "type": "string",
+                    "description": "One or two sentences, shown to the graduate alongside the suggestion.",
+                },
             },
+            "required": ["track", "reasoning"],
         },
-        "required": ["track", "reasoning"],
     },
 }
 
 AGENTS_TOOL = {
-    "name": "suggest_agents",
-    "description": (
-        "Suggest which optional agents (by id, from the given catalog) fit "
-        "this graduate's track. It's fine to suggest none if nothing is a "
-        "clear fit — don't pad the list."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "agent_ids": {"type": "array", "items": {"type": "string"}},
+    "type": "function",
+    "function": {
+        "name": "suggest_agents",
+        "description": (
+            "Suggest which optional agents (by id, from the given catalog) fit "
+            "this graduate's track. It's fine to suggest none if nothing is a "
+            "clear fit — don't pad the list."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["agent_ids"],
         },
-        "required": ["agent_ids"],
     },
 }
 
 
-def _forced_tool_call(model: ChatAnthropic, tool: dict, messages: list) -> dict:
-    """Binds a single tool with tool_choice forced to it, invokes, and
-    returns that tool call's args. Mirrors llm_client.call_with_tool's
-    contract, translated to LangChain's tool-call shape."""
-    bound = model.bind_tools([tool], tool_choice=tool["name"])
-    response = bound.invoke(messages)
-    for call in response.tool_calls:
-        if call["name"] == tool["name"]:
-            return call["args"]
-    raise RuntimeError(f"Model did not call '{tool['name']}' as expected.")
+def _forced_tool_call(models: list[tuple[str, BaseChatModel]], tool: dict, messages: list) -> dict:
+    """Tries each (provider, model) pair in the given chain, in order,
+    binding the tool with tool_choice forced to it. Falls over to the next
+    provider on an availability-type error; raises once the whole chain is
+    exhausted."""
+    name = tool["function"]["name"]
+    errors = []
+    for provider, model in models:
+        try:
+            bound = model.bind_tools([tool], tool_choice=name)
+            response = bound.invoke(messages)
+            for call in response.tool_calls:
+                if call["name"] == name:
+                    return call["args"]
+            raise RuntimeError(f"Model did not call '{name}' as expected.")
+        except FAILOVER_EXCEPTIONS as e:
+            errors.append(f"{provider}: {e}")
+            continue
+    raise RuntimeError(f"{ALL_PROVIDERS_FAILED} for tool '{name}':\n" + "\n".join(errors))
 
-
-# --- Nodes -----------------------------------------------------------------
 
 def generate_questions(state: OnboardingState) -> dict:
     args = _forced_tool_call(
-        small_model(),
+        small_model_chain(),
         QUESTIONS_TOOL,
         [
             SystemMessage(
@@ -112,8 +129,6 @@ def generate_questions(state: OnboardingState) -> dict:
 
 
 def await_answers(state: OnboardingState) -> dict:
-    """Pauses for the graduate's answers — each question is independently
-    skippable — plus any free text they want to add themselves."""
     payload = interrupt(
         {
             "type": "qa",
@@ -142,7 +157,7 @@ def suggest_track(state: OnboardingState) -> dict:
         or "(no follow-up answers given — that's fine, work from the CV)"
     )
     args = _forced_tool_call(
-        small_model(),
+        small_model_chain(),
         TRACK_TOOL,
         [
             SystemMessage(
@@ -186,7 +201,7 @@ def suggest_agents(state: OnboardingState) -> dict:
         f"- {c['id']}: {c['name']} — {c['description']}" for c in catalog
     )
     args = _forced_tool_call(
-        small_model(),
+        small_model_chain(),
         AGENTS_TOOL,
         [
             SystemMessage(
@@ -218,13 +233,7 @@ def finalize(state: OnboardingState) -> dict:
     return {"stage": "complete"}
 
 
-# --- Graph -------------------------------------------------------------
-
 def build_onboarding_graph(checkpointer=None):
-    """checkpointer defaults to an in-memory saver — fine for dev/tests,
-    but process-local. Swap in a persistent one (e.g. a Postgres saver)
-    before this goes to production, or a restart loses every graduate's
-    in-progress onboarding."""
     graph = StateGraph(OnboardingState)
 
     for name, node in [

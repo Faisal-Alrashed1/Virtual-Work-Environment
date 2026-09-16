@@ -16,14 +16,13 @@ for now, no task-flow module of their own) have a persona defined here
 directly, plus whatever shared context (CV, employee file, and — for
 grounding — the current project/week) helps any of them give a useful
 answer. The model just replies in plain text here; there are no tools to
-call in a conversation, so this uses a plain messages.create rather than
-call_agentic/call_with_tool.
+call in a conversation, so this uses call_agentic with an empty tool list
+rather than call_with_tool.
 """
 from sqlalchemy.orm import Session
 
 from app.agents import hr, manager, mentor
-from app.agents.llm_client import get_client
-from app.config import settings
+from app.agents.llm_client import call_agentic
 from app.models import (
     AgentCatalog,
     AgentType,
@@ -37,11 +36,6 @@ from app.models import (
     WeekStatus,
 )
 
-# Each agent's base persona, reused from the task-flow modules so the
-# Meeting Room voice matches the rest of the app. Stage 2's four optional
-# agents don't have task-flow modules of their own yet (they're
-# roster-only — see docs/STAGE2_TEAM_AND_ORIENTATION.md), so their
-# personas are written here directly, conversational-only for now.
 PERSONA: dict[AgentType, str] = {
     AgentType.MANAGER: manager.SYSTEM_PROMPT,
     AgentType.MENTOR: mentor.SYSTEM_PROMPT,
@@ -73,9 +67,6 @@ PERSONA: dict[AgentType, str] = {
     ),
 }
 
-# The three defaults are always on every graduate's team; anything else
-# only if they actually added it during onboarding (or later — the
-# catalog is meant to grow, see catalog.py).
 _DEFAULT_AGENTS = {AgentType.MANAGER, AgentType.MENTOR, AgentType.HR}
 
 
@@ -161,16 +152,13 @@ def send_message(
     ]
     system = PERSONA[agent] + _MEETING_FRAMING + "\n\n" + _shared_context(db, user)
 
-    response = get_client().messages.create(
-        model=settings.llm_model,
-        max_tokens=1000,
+    reply_obj = call_agentic(
         system=system,
         messages=messages,
+        tools=[],
+        max_tokens=1000,
     )
-    reply_text = next(
-        (b.text for b in response.content if b.type == "text" and b.text),
-        "Sorry, I didn't catch that — could you rephrase?",
-    )
+    reply_text = reply_obj.text or "Sorry, I didn't catch that — could you rephrase?"
 
     reply = ChatMessage(
         user_id=user.id,
