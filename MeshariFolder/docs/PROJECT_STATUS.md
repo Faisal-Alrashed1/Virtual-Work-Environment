@@ -84,6 +84,23 @@ changed via `create_all`), so they read as complete. `POST
 /onboarding/reset` + a "Go through it again" button fixes it for anyone
 stuck, going forward.
 
+**Multi-provider LLM support, with tier-aware routing.** The backend is
+no longer hard-wired to Anthropic — Anthropic, OpenAI, DeepSeek, and
+Qwen are all supported, with automatic failover between them (built by
+Faisal Alrashed, `Venv-llm-provider-update`). On top of that: provider
+selection is now genuinely tier-aware — a "main"-tier call (real
+judgment — Mentor's review, the Manager's synthesis) and a "small"-tier
+call (cheap/mechanical — onboarding suggestions, a roundtable
+specialist's comment) can route through *different* provider priorities
+via `LLM_PROVIDER_PRIORITY_MAIN`/`_SMALL`, not just different model
+names within whichever provider happens to be first. This also caught
+and fixed a real bug: `call_agentic` and the LangGraph model chain both
+accepted a `tier` argument but never actually used it to pick the
+provider chain, only the model name — meaning tier never affected
+*which* provider got tried, only *what* it was asked to run. Full
+writeup, including the bug and the failover proof: `docs/
+LLM_PROVIDER_FAILOVER.md`.
+
 ## Stage 2, in full — one doc per slice, in build order
 
 1. `docs/STAGE2_ONBOARDING_FLOW.md` — the onboarding LangGraph (CV → Q&A
@@ -253,7 +270,8 @@ python smoke_test_agents.py                  # Manager/Mentor/HR basics (19)
 python smoke_test_weekly_cycle.py            # Project/Week schema + iterative review (17)
 python smoke_test_orchestration.py           # full weekly cycle, end to end (57)
 python smoke_test_meeting.py                 # direct agent chat, Stage 1 scope (15)
-python smoke_test_llm_errors.py              # graceful LLM-failure handling (8)
+python smoke_test_llm_errors.py              # graceful LLM-failure handling (10)
+python smoke_test_llm_provider_routing.py    # tier-aware provider selection (14)
 python smoke_test_stage2_onboarding.py       # onboarding graph, isolated (28)
 python smoke_test_stage2_onboarding_router.py # onboarding endpoints, incl. reset (34)
 python smoke_test_stage2_collaboration.py    # Manager/HR consulting the Mentor (9)

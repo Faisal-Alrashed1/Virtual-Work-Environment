@@ -47,7 +47,7 @@ class FakeModel:
         self._responses = responses
 
     def bind_tools(self, tools, tool_choice):
-        name = tools[0]["name"]
+        name = tools[0]["function"]["name"]
         return FakeBoundModel(name, self._responses[name])
 
 
@@ -70,8 +70,8 @@ def register_and_login(email):
 
 
 with patch(
-    "app.agents.graph.onboarding_graph.small_model",
-    return_value=FakeModel(FAKE_RESPONSES),
+    "app.agents.graph.onboarding_graph.small_model_chain",
+    return_value=[("anthropic", FakeModel(FAKE_RESPONSES))],
 ):
     headers = register_and_login("stage2-router-test@example.com")
 

@@ -57,7 +57,7 @@ def _build_chat_model(provider: str, model_name: str, max_tokens: int, **kwargs)
 
 
 def _model_chain(tier: str, max_tokens: int, **kwargs) -> list[tuple[str, BaseChatModel]]:
-    chain = resolve_provider_chain()
+    chain = resolve_provider_chain(tier)
     if not chain:
         raise LLMConfigError(NO_PROVIDER_CONFIGURED)
     return [
