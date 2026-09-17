@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.models import AgentCatalog, User, UserAgent  # noqa: E402
+from app.agents.llm_client import AgentReply  # noqa: E402
 
 client = TestClient(app)
 client.__enter__()
@@ -31,17 +32,6 @@ def check(label, condition):
     status = "PASS" if condition else "FAIL"
     print(f"[{status}] {label}")
     assert condition, label
-
-
-class FakeContentBlock:
-    def __init__(self, text):
-        self.type = "text"
-        self.text = text
-
-
-class FakeResponse:
-    def __init__(self, text):
-        self.content = [FakeContentBlock(text)]
 
 
 def register_and_login(email):
@@ -96,11 +86,11 @@ def fake_call_agentic(**kwargs):
     system = kwargs["system"]
     captured_calls.append(kwargs)
     if "synthesis" in system.lower() or "synthesize" in system.lower() or "pull the discussion together" in system.lower():
-        return FakeResponse(MANAGER_SYNTHESIS)
+        return AgentReply(text=MANAGER_SYNTHESIS)
     for prefix, reply in SPECIALIST_REPLIES.items():
         if system.startswith(prefix):
-            return FakeResponse(reply)
-    return FakeResponse("(generic)")
+            return AgentReply(text=reply)
+    return AgentReply(text="(generic)")
 
 
 # --- full roundtable: all three specialists + manager synthesis ---
@@ -142,8 +132,8 @@ check(
     "SQL injection" in manager_call["messages"][0]["content"]
     and "No CI config" in manager_call["messages"][0]["content"],
 )
-check("manager synthesis uses the main model", manager_call["model"] == "claude-sonnet-5")
-check("specialists use the small model", data_call["model"] == "claude-haiku-4-5-20251001")
+check("manager synthesis uses the main tier", manager_call["tier"] == "main")
+check("specialists use the small tier", data_call["tier"] == "small")
 
 # The thread should now hold: mentor + 3 specialists + manager synthesis.
 r = client.get(f"/tasks/{task_id}", headers=headers)
@@ -182,8 +172,8 @@ def flaky(**kwargs):
     if kwargs["system"].startswith("You are the Data Reviewer"):
         raise RuntimeError("simulated failure")
     if "pull the discussion together" in kwargs["system"].lower():
-        return FakeResponse(MANAGER_SYNTHESIS)
-    return FakeResponse("Security take: looks fine.")
+        return AgentReply(text=MANAGER_SYNTHESIS)
+    return AgentReply(text="Security take: looks fine.")
 
 
 with patch("app.agents.mentor.call_with_tool", return_value=MENTOR_APPROVE), patch(

@@ -26,18 +26,6 @@ def check(label, condition):
     assert condition, label
 
 
-class FakeBlock:
-    def __init__(self, type_, **kw):
-        self.type = type_
-        for k, v in kw.items():
-            setattr(self, k, v)
-
-
-class FakeResponse:
-    def __init__(self, content):
-        self.content = content
-
-
 # --- setup: register, login, submit CV ---
 r = client.post(
     "/auth/register",
@@ -100,8 +88,10 @@ r = client.post(
 )
 check("user posts message", r.status_code == 201)
 
-fake_reply = FakeResponse(
-    [FakeBlock("tool_use", name="post_message", input={"content": "No need — plain HTML/CSS is fine for this one."})]
+from app.agents.llm_client import AgentReply, ToolCall  # noqa: E402
+
+fake_reply = AgentReply(
+    tool_calls=[ToolCall(name="post_message", input={"content": "No need — plain HTML/CSS is fine for this one."})]
 )
 with patch("app.agents.manager.call_agentic", return_value=fake_reply):
     r = client.post(f"/agents/manager/reply/{task['id']}", headers=headers)

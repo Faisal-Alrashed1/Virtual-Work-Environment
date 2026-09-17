@@ -6,7 +6,7 @@ smoke tests, no API key needed.
 Run: python smoke_test_meeting.py
 """
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 os.environ["DATABASE_URL"] = os.environ.get(
     "DATABASE_URL", "sqlite:///./smoke_test_meeting.db"
@@ -15,6 +15,7 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "not-used-mocked-below")
 
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
+from app.agents.llm_client import AgentReply  # noqa: E402
 
 client = TestClient(app)
 client.__enter__()
@@ -24,15 +25,6 @@ def check(label, condition):
     status = "PASS" if condition else "FAIL"
     print(f"[{status}] {label}")
     assert condition, label
-
-
-def mock_reply(text):
-    resp = MagicMock()
-    block = MagicMock()
-    block.type = "text"
-    block.text = text
-    resp.content = [block]
-    return resp
 
 
 # --- setup ---
@@ -56,12 +48,7 @@ r = client.get("/meeting/ceo", headers=h)
 check("unknown agent -> 422", r.status_code == 422)
 
 # --- send a message to the mentor ---
-with patch(
-    "app.agents.meeting.get_client",
-    return_value=MagicMock(
-        messages=MagicMock(create=MagicMock(return_value=mock_reply("Try smaller commits.")))
-    ),
-):
+with patch("app.agents.meeting.call_agentic", return_value=AgentReply(text="Try smaller commits.")):
     r = client.post("/meeting/mentor", json={"content": "How do I improve my PRs?"}, headers=h)
 check("send to mentor -> 201", r.status_code == 201)
 check("reply is from the agent", r.json()["sender_type"] == "agent")
@@ -83,12 +70,7 @@ r = client.get("/meeting/manager", headers=h)
 check("manager history still empty (isolated per agent)", r.json() == [])
 
 # --- a second mentor message appends, doesn't replace ---
-with patch(
-    "app.agents.meeting.get_client",
-    return_value=MagicMock(
-        messages=MagicMock(create=MagicMock(return_value=mock_reply("Good question.")))
-    ),
-):
+with patch("app.agents.meeting.call_agentic", return_value=AgentReply(text="Good question.")):
     client.post("/meeting/mentor", json={"content": "And code review etiquette?"}, headers=h)
 r = client.get("/meeting/mentor", headers=h)
 check("mentor history now has 4 messages", len(r.json()) == 4)

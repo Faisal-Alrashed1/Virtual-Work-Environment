@@ -55,7 +55,7 @@ class FakeModel:
         self._responses = responses
 
     def bind_tools(self, tools, tool_choice):
-        name = tools[0]["name"]
+        name = tools[0]["function"]["name"]
         return FakeBoundModel(name, self._responses[name])
 
 
@@ -110,8 +110,8 @@ check(
 # --- the onboarding graph itself, end to end through all three interrupts ---
 
 with patch(
-    "app.agents.graph.onboarding_graph.small_model",
-    return_value=FakeModel(FAKE_RESPONSES),
+    "app.agents.graph.onboarding_graph.small_model_chain",
+    return_value=[("anthropic", FakeModel(FAKE_RESPONSES))],
 ):
     graph = build_onboarding_graph()
     config = {"configurable": {"thread_id": user.id}}

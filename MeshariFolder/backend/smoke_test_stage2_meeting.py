@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.models import AgentCatalog, User, UserAgent  # noqa: E402
+from app.agents.llm_client import AgentReply  # noqa: E402
 
 client = TestClient(app)
 client.__enter__()
@@ -28,17 +29,6 @@ def check(label, condition):
     status = "PASS" if condition else "FAIL"
     print(f"[{status}] {label}")
     assert condition, label
-
-
-class FakeContentBlock:
-    def __init__(self, text):
-        self.type = "text"
-        self.text = text
-
-
-class FakeResponse:
-    def __init__(self, text):
-        self.content = [FakeContentBlock(text)]
 
 
 r = client.post(
@@ -72,9 +62,9 @@ db.close()
 r = client.get("/meeting/security_reviewer", headers=headers)
 check("now accessible after being added to the roster", r.status_code == 200)
 
-with patch("app.agents.meeting.get_client") as mock_get_client:
-    mock_get_client.return_value.messages.create.return_value = FakeResponse(
-        "Looks like that endpoint doesn't validate the redirect URL — open redirect risk."
+with patch("app.agents.meeting.call_agentic") as mock_call:
+    mock_call.return_value = AgentReply(
+        text="Looks like that endpoint doesn't validate the redirect URL — open redirect risk."
     )
     r = client.post(
         "/meeting/security_reviewer",
@@ -87,7 +77,7 @@ with patch("app.agents.meeting.get_client") as mock_get_client:
 
     # the system prompt actually sent should be the security-reviewer
     # persona, not manager/mentor/hr's
-    sent_system = mock_get_client.return_value.messages.create.call_args.kwargs["system"]
+    sent_system = mock_call.call_args.kwargs["system"]
     check("security reviewer persona used, not a generic/wrong one", "Security Reviewer" in sent_system)
 
 print("\nAll Stage 2 meeting-room smoke checks passed.")

@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.models import AgentCatalog, User, UserAgent  # noqa: E402
+from app.agents.llm_client import AgentReply  # noqa: E402
 
 client = TestClient(app)
 client.__enter__()
@@ -30,17 +31,6 @@ def check(label, condition):
     status = "PASS" if condition else "FAIL"
     print(f"[{status}] {label}")
     assert condition, label
-
-
-class FakeContentBlock:
-    def __init__(self, text):
-        self.type = "text"
-        self.text = text
-
-
-class FakeResponse:
-    def __init__(self, text):
-        self.content = [FakeContentBlock(text)]
 
 
 def register_and_login(email):
@@ -114,10 +104,10 @@ tid, _ = make_submitted_task(email)
 with patch("app.agents.co_reviewers.call_agentic") as mock_co, patch(
     "app.agents.co_reviewers.fetch_repo_context", return_value=""
 ):
-    mock_co.return_value = FakeResponse("looks fine")
+    mock_co.return_value = AgentReply(text="looks fine")
     types = run_co(email, tid)
 check("run_co_reviews called call_agentic twice", mock_co.call_count == 2)
-check("co-reviews use the small model", {c.kwargs["model"] for c in mock_co.call_args_list} == {"claude-haiku-4-5-20251001"})
+check("co-reviews use the small tier", {c.kwargs["tier"] for c in mock_co.call_args_list} == {"small"})
 check("exactly security + devops posted, not data", types == ["devops", "security_reviewer"])
 
 # career coach on roster -> never co-reviews
@@ -141,7 +131,7 @@ tid, _ = make_submitted_task(email)
 def flaky_call(**kwargs):
     if kwargs["system"].startswith("You are the Security Reviewer"):
         raise RuntimeError("simulated rate limit")
-    return FakeResponse("data quality reasonable")
+    return AgentReply(text="data quality reasonable")
 
 
 with patch("app.agents.co_reviewers.call_agentic", side_effect=flaky_call), patch(

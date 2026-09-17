@@ -83,10 +83,20 @@ def resolve_api_key(provider: str) -> str:
     }.get(provider, "")
 
 
-def resolve_provider_chain() -> list[str]:
-    """Reads LLM_PROVIDER_PRIORITY and returns only the known providers
-    that have a non-empty API key, in the order given."""
-    raw = settings.llm_provider_priority or "anthropic"
+def resolve_provider_chain(tier: str = "main") -> list[str]:
+    """Reads the tier-specific provider priority (LLM_PROVIDER_PRIORITY_MAIN
+    / _SMALL), falling back to the shared LLM_PROVIDER_PRIORITY if that
+    tier has no override set, and returns only the known providers that
+    have a non-empty API key, in the order given. This is what actually
+    makes provider selection tier-aware — a cheap/mechanical call and a
+    real judgment call can prefer different providers, not just different
+    model names within whichever provider happens to be first."""
+    tier_setting = (
+        settings.llm_provider_priority_small
+        if tier == "small"
+        else settings.llm_provider_priority_main
+    )
+    raw = tier_setting or settings.llm_provider_priority or "anthropic"
     ordered = [p.strip().lower() for p in raw.split(",") if p.strip()]
     return [p for p in ordered if p in _KNOWN_PROVIDERS and resolve_api_key(p)]
 
@@ -164,14 +174,15 @@ def call_with_tool(
     tools: list[dict],
     force_tool: str,
     max_tokens: int = 1500,
+    tier: str = "main",
 ) -> dict:
-    chain = resolve_provider_chain()
+    chain = resolve_provider_chain(tier)
     if not chain:
         raise LLMConfigError(NO_PROVIDER_CONFIGURED)
     errors = []
     for provider in chain:
         try:
-            model_name = _model_name_for(provider, "main")
+            model_name = _model_name_for(provider, tier)
             if provider == "anthropic":
                 response = _anthropic().messages.create(
                     model=model_name,
@@ -213,7 +224,7 @@ def call_agentic(
     max_tokens: int = 1500,
     tier: str = "main",
 ) -> AgentReply:
-    chain = resolve_provider_chain()
+    chain = resolve_provider_chain(tier)
     if not chain:
         raise LLMConfigError(NO_PROVIDER_CONFIGURED)
     errors = []

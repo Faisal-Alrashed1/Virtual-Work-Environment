@@ -7,10 +7,22 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
 
-    # Ordered, comma-separated list of providers to try, e.g. "qwen,deepseek".
-    # Any provider listed here without a matching *_API_KEY below is skipped
-    # automatically at request time.
+    # Default provider priority, used for any tier that doesn't have its
+    # own override below. e.g. "qwen,deepseek".
     llm_provider_priority: str = "anthropic"
+
+    # Optional, tier-specific overrides — this is what makes provider
+    # selection actually intelligent rather than one flat list for every
+    # call: a cheap/mechanical "small"-tier call (onboarding suggestions,
+    # a roundtable specialist's quick comment) can prefer a fast, cheap
+    # provider, while a "main"-tier judgment call (Mentor's review, the
+    # Manager's plans and synthesis) can prefer your strongest provider —
+    # different priorities, not just different model names within the
+    # same provider. Leave either blank to fall back to
+    # llm_provider_priority above for that tier. See llm_client.
+    # resolve_provider_chain and docs/LLM_PROVIDER_FAILOVER.md.
+    llm_provider_priority_main: str = ""
+    llm_provider_priority_small: str = ""
 
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5"
