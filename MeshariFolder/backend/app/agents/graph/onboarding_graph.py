@@ -20,7 +20,7 @@ from langgraph.types import interrupt
 
 from app.agents.graph.models import small_model_chain
 from app.agents.graph.state import OnboardingState
-from app.agents.llm_client import ALL_PROVIDERS_FAILED, FAILOVER_EXCEPTIONS
+from app.agents.llm_client import ALL_PROVIDERS_FAILED, FAILOVER_EXCEPTIONS, logger
 from app.models import TrackEnum
 
 QUESTIONS_TOOL = {
@@ -98,14 +98,17 @@ def _forced_tool_call(models: list[tuple[str, BaseChatModel]], tool: dict, messa
     name = tool["function"]["name"]
     errors = []
     for provider, model in models:
+        model_name = getattr(model, "model", None) or getattr(model, "model_name", None) or "?"
         try:
             bound = model.bind_tools([tool], tool_choice=name)
             response = bound.invoke(messages)
             for call in response.tool_calls:
                 if call["name"] == name:
+                    logger.info("[LLM] %s (%s, small-tier) -> %s", provider, model_name, name)
                     return call["args"]
             raise RuntimeError(f"Model did not call '{name}' as expected.")
         except FAILOVER_EXCEPTIONS as e:
+            logger.warning("[LLM] %s unavailable (%s) — failing over", provider, e)
             errors.append(f"{provider}: {e}")
             continue
     raise RuntimeError(f"{ALL_PROVIDERS_FAILED} for tool '{name}':\n" + "\n".join(errors))

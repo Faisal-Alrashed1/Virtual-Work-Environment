@@ -99,7 +99,24 @@ accepted a `tier` argument but never actually used it to pick the
 provider chain, only the model name — meaning tier never affected
 *which* provider got tried, only *what* it was asked to run. Full
 writeup, including the bug and the failover proof: `docs/
-LLM_PROVIDER_FAILOVER.md`.
+LLM_PROVIDER_FAILOVER.md`. Every LLM call also now logs which
+provider/model actually answered — see that doc's "Terminal logging"
+section.
+
+**Root-caused and fixed a real hydration bug affecting every non-English
+and light-mode visitor.** `ThemeProvider`/`LocaleProvider` were both
+reading the anti-flash script's *already-applied* `<html>` attributes as
+their React state's initial value — correct-looking (matches what's on
+screen instantly), but wrong for SSR: the server always renders with the
+default ("dark"/"en"), so any visitor with a different stored preference
+got a client-vs-server text mismatch on their very first render — a
+hydration error, on every page, for every Arabic or light-mode graduate.
+Orientation, being the most translation-heavy page, hit this hardest —
+worth knowing if "the greeting page doesn't work" comes up again for a
+non-English visitor. Fixed by starting state at the SSR default always,
+then adopting the real applied value in a layout effect (post-hydration,
+never compared against server output) — the same pattern `next-themes`
+uses. See `frontend/src/lib/use-isomorphic-layout-effect.ts`.
 
 ## Stage 2, in full — one doc per slice, in build order
 

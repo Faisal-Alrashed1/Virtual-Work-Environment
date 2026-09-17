@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useIsomorphicLayoutEffect } from "../use-isomorphic-layout-effect";
 import en from "./en";
 import ar from "./ar";
 import type { Dictionary } from "./en";
@@ -64,15 +65,29 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
 
 /** Mirrors lib/theme.tsx's readAppliedTheme: reads whatever the anti-
  * flash inline script (layout.tsx's <head>) already applied to
- * <html lang/dir> before this ever runs, so first client render always
- * matches what's already on screen. */
+ * <html lang/dir>. Only ever called from a layout effect, after
+ * hydration commits — never as the initial useState value, which would
+ * make the client's first render (the one hydration compares against
+ * the server-rendered HTML) disagree with the server for any non-English
+ * visitor. See ThemeProvider's identical fix for the full reasoning. */
 function readAppliedLocale(): Locale {
   if (typeof document === "undefined") return "en";
   return document.documentElement.getAttribute("lang") === "ar" ? "ar" : "en";
 }
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocale] = useState<Locale>(readAppliedLocale);
+  // Must start at "en" — the same default the server always renders,
+  // since it has no access to localStorage/navigator.language. See the
+  // comment above and ThemeProvider's matching fix.
+  const [locale, setLocale] = useState<Locale>("en");
+
+  // Adopts the anti-flash script's actual applied locale after
+  // hydration commits, synchronously before paint — no visible flash,
+  // and never compared against the server-rendered markup.
+  useIsomorphicLayoutEffect(() => {
+    const applied = readAppliedLocale();
+    setLocale((current) => (current === applied ? current : applied));
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute("lang", locale);

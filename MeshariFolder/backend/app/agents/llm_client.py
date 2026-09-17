@@ -18,6 +18,7 @@ rate limited, connection dropped) moves on to the next provider. Any other
 error is raised immediately, since it isn't an availability problem.
 """
 import json
+import logging
 from dataclasses import dataclass, field
 
 from anthropic import Anthropic
@@ -34,6 +35,22 @@ from openai import PermissionDeniedError as OPermErr
 from openai import RateLimitError as ORateErr
 
 from app.config import settings
+
+# One line per call showing which provider/model actually answered (and
+# a line per provider that got skipped via failover) — visible in the
+# terminal at INFO level. Configured with its own handler/level rather
+# than relying on uvicorn's root logging setup, which by default filters
+# out INFO on any logger it didn't configure itself — without this, these
+# calls would silently produce no output at all. propagate=False avoids
+# a duplicate line if the app's own logging setup ever also attaches a
+# root handler.
+logger = logging.getLogger("venv.llm")
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 
 class LLMConfigError(RuntimeError):
@@ -194,6 +211,7 @@ def call_with_tool(
                 )
                 for block in response.content:
                     if block.type == "tool_use":
+                        logger.info("[LLM] %s (%s, %s-tier) -> %s", provider, model_name, tier, force_tool)
                         return {"tool_name": block.name, "input": block.input}
                 raise RuntimeError(f"Model did not call '{force_tool}' as expected.")
 
@@ -209,8 +227,10 @@ def call_with_tool(
                 tool_choice={"type": "function", "function": {"name": force_tool}},
             )
             call = response.choices[0].message.tool_calls[0]
+            logger.info("[LLM] %s (%s, %s-tier) -> %s", provider, model_name, tier, force_tool)
             return {"tool_name": call.function.name, "input": json.loads(call.function.arguments)}
         except FAILOVER_EXCEPTIONS as e:
+            logger.warning("[LLM] %s unavailable (%s) — failing over", provider, e)
             errors.append(f"{provider}: {e}")
             continue
     raise RuntimeError(f"{ALL_PROVIDERS_FAILED}:\n" + "\n".join(errors))
@@ -241,6 +261,7 @@ def call_agentic(
                 )
                 text = next((b.text for b in response.content if b.type == "text" and b.text), None)
                 calls = [ToolCall(b.name, b.input) for b in response.content if b.type == "tool_use"]
+                logger.info("[LLM] %s (%s, %s-tier) -> reply", provider, model_name, tier)
                 return AgentReply(text=text, tool_calls=calls)
 
             client = _openai_compatible(provider)
@@ -258,8 +279,10 @@ def call_agentic(
                 ToolCall(c.function.name, json.loads(c.function.arguments))
                 for c in (msg.tool_calls or [])
             ]
+            logger.info("[LLM] %s (%s, %s-tier) -> reply", provider, model_name, tier)
             return AgentReply(text=msg.content, tool_calls=calls)
         except FAILOVER_EXCEPTIONS as e:
+            logger.warning("[LLM] %s unavailable (%s) — failing over", provider, e)
             errors.append(f"{provider}: {e}")
             continue
     raise RuntimeError(f"{ALL_PROVIDERS_FAILED}:\n" + "\n".join(errors))
