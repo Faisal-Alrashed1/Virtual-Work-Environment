@@ -87,7 +87,28 @@ than uniformly.
 | `backend/app/agents/graph/onboarding_graph.py` | Tool schemas and forced tool-calling updated to work across providers with failover. |
 | `backend/app/main.py` | Added a clean `503` error handler for "all providers failed" / missing configuration. |
 
-## Notes
+## Terminal logging — which provider/model actually answered
+
+Every `call_with_tool`/`call_agentic` call (and the LangGraph onboarding
+path) logs one line when it gets an answer, and one line per provider
+skipped via failover:
+
+```
+[LLM] anthropic (claude-sonnet-5, main-tier) -> reply
+[LLM] qwen unavailable (401 invalid api key) — failing over
+[LLM] deepseek (deepseek-chat, small-tier) -> generate_questions
+```
+
+Configured with its own handler/level (`logging.getLogger("venv.llm")`,
+`propagate = False`) rather than relying on uvicorn's own logging setup —
+by default, uvicorn only configures *its own* loggers for INFO output;
+any other logger's INFO records get silently dropped unless something
+explicitly enables them. Without this, these lines would produce no
+terminal output at all despite the code running correctly — confirmed by
+testing a plain `logging.getLogger(...).info(...)` call with zero config
+first, seeing it swallowed, then fixing it this way.
+
+
 
 - No code changes are required to add a new provider's *model choice* - just add its key and put it in the relevant priority variable(s).
 - Adding a brand-new provider (beyond the four above) requires adding its settings in `config.py` and its client setup in `llm_client.py`.
