@@ -2,6 +2,8 @@
 
 from sqlalchemy.orm import Session
 
+
+from app.agents.llm_client import call_agentic
 from app.models import Review, User
 
 
@@ -16,18 +18,17 @@ SYSTEM_PROMPT = (
     "technical-review role."
 )
 
-from sqlalchemy.orm import Session
 
-from app.models import Review, User
-
-SYSTEM_PROMPT = (...)
 
 def build_context(db: Session, user: User) -> str:
     """Build career-specific context for the Coach Agent."""
 
-    parts: list[str] = [
-        f"Confirmed track: {user.track.value}"
-    ]
+    parts: list[str] = []
+
+    if user.track:
+        parts.append(f"Confirmed track: {user.track.value}")
+    else:
+        parts.append("Confirmed track: not selected yet")
 
     employee_file = user.employee_file
 
@@ -62,3 +63,76 @@ def build_context(db: Session, user: User) -> str:
         )
 
     return "Career coaching context:\n" + "\n".join(parts)
+
+def build_career_profile(user: User) -> str:
+    """Build a short career profile for the trainee."""
+
+    parts: list[str] = []
+
+    if user.track:
+        parts.append(f"Career track: {user.track.value}")
+
+    employee_file = user.employee_file
+
+    if employee_file:
+        if employee_file.skills_json:
+            parts.append(f"Current skills: {employee_file.skills_json}")
+
+        if employee_file.strengths_json:
+            parts.append(f"Strengths: {employee_file.strengths_json}")
+
+        if employee_file.growth_areas_json:
+            parts.append(
+                f"Skills to improve: {employee_file.growth_areas_json}"
+            )
+
+    if not parts:
+        return "No career profile information is available yet."
+
+    return "\n".join(parts)
+
+def generate_reply(
+    db: Session,
+    user: User,
+    messages: list[dict[str, str]],
+) -> str:
+    """Generate a personalized Career Coach response."""
+
+    context = build_context(db, user)
+
+    reply_obj = call_agentic(
+        system=SYSTEM_PROMPT + "\n\n" + context,
+        messages=messages,
+        tools=[],
+        max_tokens=1000,
+    )
+
+    return reply_obj.text or "Unable to generate a coaching response."
+
+def generate_career_plan(
+    db: Session,
+    user: User,
+) -> str:
+    """Generate a practical career plan for the trainee."""
+
+    context = build_context(db, user)
+
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                "Create a practical career plan for this trainee. "
+                "Include: current position, top skill gaps, "
+                "3 short-term goals, concrete actions, and next career step."
+            ),
+        }
+    ]
+
+    reply_obj = call_agentic(
+        system=SYSTEM_PROMPT + "\n\n" + context,
+        messages=messages,
+        tools=[],
+        max_tokens=1200,
+    )
+
+    return reply_obj.text or "Unable to generate a career plan."
