@@ -110,3 +110,31 @@ Example request:
 {
   "content": "Create a career plan for me."
 }
+
+## Career Coach Tools
+
+The Career Coach supports LLM tool calling through:
+
+- `create_career_plan`
+- `analyze_skill_gaps`
+- `prepare_interview`
+
+Tool schemas are defined in:
+
+`backend/app/agents/tools.py`
+
+The tools are passed to `call_agentic()` through `CAREER_COACH_TOOLS`, allowing the LLM to choose the appropriate tool based on the trainee's request instead of using hard-coded keyword routing.
+
+## Additional Career Coach Tools
+
+The Career Coach now supports five dedicated tools:
+
+- `create_career_plan`
+- `analyze_skill_gaps`
+- `prepare_interview`
+- `review_resume`
+- `build_portfolio_plan`
+
+These tools allow the LLM to choose the appropriate structured action based on the trainee's request.
+
+The Coach can also use CV content as part of its context when providing resume feedback.

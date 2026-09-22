@@ -1,7 +1,7 @@
 """Career Coach Agent for Venv."""
 
 from sqlalchemy.orm import Session
-
+from app.agents.tools import CAREER_COACH_TOOLS
 
 from app.agents.llm_client import call_agentic
 from app.models import Review, User
@@ -31,6 +31,11 @@ def build_context(db: Session, user: User) -> str:
         parts.append("Confirmed track: not selected yet")
 
     employee_file = user.employee_file
+
+    if user.cv_raw_text:
+        parts.append(
+          f"CV content: {user.cv_raw_text[:2000]}"
+      )
 
     if employee_file:
         parts.append(f"Skills: {employee_file.skills_json}")
@@ -103,11 +108,73 @@ def generate_reply(
     reply_obj = call_agentic(
         system=SYSTEM_PROMPT + "\n\n" + context,
         messages=messages,
-        tools=[],
+        tools=CAREER_COACH_TOOLS,
         max_tokens=1000,
     )
 
+    if reply_obj.tool_calls:
+        tool_call = reply_obj.tool_calls[0]
+        data = tool_call.input
+
+        if tool_call.name == "create_career_plan":
+            return (
+                f"Current position: {data['current_position']}\n\n"
+                f"Skill gaps: {', '.join(data['skill_gaps'])}\n\n"
+                f"Short-term goals:\n- "
+                + "\n- ".join(data["short_term_goals"])
+                + "\n\nActions:\n- "
+                + "\n- ".join(data["actions"])
+                + f"\n\nNext step: {data['next_step']}"
+            )
+
+        if tool_call.name == "analyze_skill_gaps":
+            return (
+                "Strengths:\n- "
+                + "\n- ".join(data["strengths"])
+                + "\n\nSkill gaps:\n- "
+                + "\n- ".join(data["gaps"])
+                + "\n\nPriorities:\n- "
+                + "\n- ".join(data["priorities"])
+                + f"\n\nRecommendation: {data['recommendation']}"
+            )
+
+        if tool_call.name == "prepare_interview":
+            return (
+                "Interview focus areas:\n- "
+                + "\n- ".join(data["focus_areas"])
+                + "\n\nPractice questions:\n- "
+                + "\n- ".join(data["practice_questions"])
+                + "\n\nPreparation tips:\n- "
+                + "\n- ".join(data["preparation_tips"])
+            )
+
+        if tool_call.name == "review_resume":
+            return (
+                "Resume strengths:\n- "
+                + "\n- ".join(data["strengths"])
+                + "\n\nWeak sections:\n- "
+                + "\n- ".join(data["weak_sections"])
+                + "\n\nMissing skills:\n- "
+                + "\n- ".join(data["missing_skills"])
+                + "\n\nRecommended improvements:\n- "
+                + "\n- ".join(data["improvements"])
+                + f"\n\nSuggested professional summary:\n{data['suggested_summary']}"
+            )
+
+        if tool_call.name == "build_portfolio_plan":
+            return (
+                "Projects to showcase:\n- "
+                + "\n- ".join(data["projects_to_showcase"])
+                + "\n\nSkills to highlight:\n- "
+                + "\n- ".join(data["skills_to_highlight"])
+                + "\n\nMissing project types:\n- "
+                + "\n- ".join(data["missing_project_types"])
+                + "\n\nPortfolio actions:\n- "
+                + "\n- ".join(data["portfolio_actions"])
+            )
+
     return reply_obj.text or "Unable to generate a coaching response."
+
 
 def generate_career_plan(
     db: Session,
