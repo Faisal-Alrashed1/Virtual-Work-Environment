@@ -1,6 +1,9 @@
 """Career Coach Agent for Venv."""
-
+import logging
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger("uvicorn.error")
+
 from app.agents.tools import CAREER_COACH_TOOLS
 
 from app.agents.llm_client import call_agentic
@@ -15,12 +18,23 @@ SYSTEM_PROMPT = (
     "skill gaps, and short-term career goals. "
     "Give specific and practical advice based on the trainee's actual progress. "
     "Do not take over the Manager's task-planning role or the Mentor's "
-    "technical-review role."
+    "technical-review role.\n\n"
+
+    "Tool selection rules:\n"
+    "- If the user asks for a career plan, use create_career_plan.\n"
+    "- If the user asks to analyze skill gaps, use analyze_skill_gaps.\n"
+    "- If the user asks for interview preparation, use prepare_interview.\n"
+    "- If the user asks to review, improve, or evaluate a resume/CV and resume "
+    "content is available, use review_resume.\n"
+    "- If the user asks for help building or improving a portfolio, "
+    "use build_portfolio_plan.\n"
+    "- For general career coaching questions, respond normally without using a tool.\n"
+    "- Select only the tool that best matches the user's main intent."
 )
 
 
 
-def build_context(db: Session, user: User) -> str:
+def build_context(db : Session, user: User) -> str:
     """Build career-specific context for the Coach Agent."""
 
     parts: list[str] = []
@@ -110,11 +124,17 @@ def generate_reply(
         messages=messages,
         tools=CAREER_COACH_TOOLS,
         max_tokens=1000,
+        tool_choice="required",
     )
 
     if reply_obj.tool_calls:
         tool_call = reply_obj.tool_calls[0]
         data = tool_call.input
+
+        logger.info(
+    "Career Coach selected tool: %s",
+    tool_call.name,
+)
 
         if tool_call.name == "create_career_plan":
             return (
@@ -125,6 +145,12 @@ def generate_reply(
                 + "\n\nActions:\n- "
                 + "\n- ".join(data["actions"])
                 + f"\n\nNext step: {data['next_step']}"
+            )
+        if tool_call.name == "general_career_advice":
+            return (
+                f"Career advice:\n{data['advice']}"
+                + "\n\nRecommended actions:\n- "
+                + "\n- ".join(data["recommended_actions"])
             )
 
         if tool_call.name == "analyze_skill_gaps":
@@ -173,33 +199,9 @@ def generate_reply(
                 + "\n- ".join(data["portfolio_actions"])
             )
 
-    return reply_obj.text or "Unable to generate a coaching response."
+    if not reply_obj.tool_calls :
+         logger.info(
+            "Career Coach returned a direct response without using a tool."
+        )
 
-
-def generate_career_plan(
-    db: Session,
-    user: User,
-) -> str:
-    """Generate a practical career plan for the trainee."""
-
-    context = build_context(db, user)
-
-    messages = [
-        {
-            "role": "user",
-            "content": (
-                "Create a practical career plan for this trainee. "
-                "Include: current position, top skill gaps, "
-                "3 short-term goals, concrete actions, and next career step."
-            ),
-        }
-    ]
-
-    reply_obj = call_agentic(
-        system=SYSTEM_PROMPT + "\n\n" + context,
-        messages=messages,
-        tools=[],
-        max_tokens=1200,
-    )
-
-    return reply_obj.text or "Unable to generate a career plan."
+         return reply_obj.text or "Unable to generate a coaching response."

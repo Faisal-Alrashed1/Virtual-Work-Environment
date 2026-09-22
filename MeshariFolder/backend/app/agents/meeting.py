@@ -150,22 +150,25 @@ def send_message(
     shared_context = _shared_context(db, user)
 
     if agent == AgentType.CAREER_COACH:
-         reply_text = coach.generate_reply(
-         db=db,
-         user=user,
-         messages=messages,
-    )
+        reply_text = coach.generate_reply(
+            db=db,
+            user=user,
+            messages=messages,
+        )
     else:
-     system = PERSONA[agent] + _MEETING_FRAMING + "\n\n" + shared_context
+        system = PERSONA[agent] + _MEETING_FRAMING + "\n\n" + shared_context
 
-    reply_obj = call_agentic(
-        system=system,
-        messages=messages,
-        tools=[],
-        max_tokens=1000,
-    )
+        reply_obj = call_agentic(
+            system=system,
+            messages=messages,
+            tools=[],
+            max_tokens=1000,
+        )
 
-    reply_text = reply_obj.text or "Sorry, I didn't catch that — could you rephrase?"
+        reply_text = (
+            reply_obj.text
+            or "Sorry, I didn't catch that — could you rephrase?"
+        )
 
     reply = ChatMessage(
         user_id=user.id,

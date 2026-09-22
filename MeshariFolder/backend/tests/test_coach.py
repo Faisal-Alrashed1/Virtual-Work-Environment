@@ -58,27 +58,6 @@ def test_generate_reply(monkeypatch):
     assert result == "Test coach response"
 
 
-def test_generate_career_plan(monkeypatch):
-    monkeypatch.setattr(
-        coach,
-        "build_context",
-        lambda db, user: "Test career context",
-    )
-
-    monkeypatch.setattr(
-        coach,
-        "call_agentic",
-        lambda **kwargs: SimpleNamespace(text="Test career plan"),
-    )
-
-    result = coach.generate_career_plan(
-        db=object(),
-        user=SimpleNamespace(),
-    )
-
-    assert result == "Test career plan"
-
-
 def test_create_career_plan_tool(monkeypatch):
     monkeypatch.setattr(
         coach,
@@ -275,3 +254,89 @@ def test_build_portfolio_plan_tool(monkeypatch):
     assert "FastAPI project" in result
     assert "Python" in result
     assert "Deploy project" in result
+
+def test_general_career_advice_tool(monkeypatch):
+    monkeypatch.setattr(
+        coach,
+        "build_context",
+        lambda db, user: "Test career context",
+    )
+
+    monkeypatch.setattr(
+        coach,
+        "call_agentic",
+        lambda **kwargs: SimpleNamespace(
+            text=None,
+            tool_calls=[
+                ToolCall(
+                    name="general_career_advice",
+                    input={
+                        "advice": "Focus on building demonstrable experience.",
+                        "recommended_actions": [
+                            "Finish one strong project",
+                            "Document it clearly",
+                        ],
+                    },
+                )
+            ],
+        ),
+    )
+
+    result = coach.generate_reply(
+        db=object(),
+        user=SimpleNamespace(),
+        messages=[
+            {
+                "role": "user",
+                "content": "What should I focus on in my career?",
+            }
+        ],
+    )
+
+    assert "Focus on building demonstrable experience." in result
+    assert "Finish one strong project" in result
+
+
+def test_career_coach_requires_tool_choice(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(
+        coach,
+        "build_context",
+        lambda db, user: "Test career context",
+    )
+
+    def fake_call_agentic(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            text=None,
+            tool_calls=[
+                ToolCall(
+                    name="general_career_advice",
+                    input={
+                        "advice": "Keep improving.",
+                        "recommended_actions": ["Build a project"],
+                    },
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        coach,
+        "call_agentic",
+        fake_call_agentic,
+    )
+
+    coach.generate_reply(
+        db=object(),
+        user=SimpleNamespace(),
+        messages=[
+            {
+                "role": "user",
+                "content": "Give me career advice",
+            }
+        ],
+    )
+
+    assert captured["tool_choice"] == "required"
+    assert captured["tools"] == coach.CAREER_COACH_TOOLS
