@@ -13,6 +13,7 @@ import { AGENT_ORDER } from "@/lib/agents";
 import type { ExtraAgent } from "@/lib/team";
 import { AgentNode, CustomAgentNode, EmployeeFileNode, UserNode } from "@/components/board/nodes";
 import type { BoardSelection } from "@/components/board/detail-panel";
+import { localizeExtraAgent, useLocale } from "@/lib/i18n/locale";
 
 const nodeTypes = {
   agent: AgentNode,
@@ -46,7 +47,13 @@ interface FlowSectionProps {
  * and below whatever that total width ends up being.
  */
 export function FlowSection({ onSelect, extraAgents }: FlowSectionProps) {
-  const totalAgents = AGENT_ORDER.length + extraAgents.length;
+  const { t } = useLocale();
+
+  const localizedExtraAgents = extraAgents.map((agent) =>
+    localizeExtraAgent(agent, t)
+  );
+
+  const totalAgents = AGENT_ORDER.length + localizedExtraAgents.length;
   const centerX = START_X + ((totalAgents - 1) * GAP) / 2;
 
   const nodes: Node[] = useMemo(
@@ -58,7 +65,7 @@ export function FlowSection({ onSelect, extraAgents }: FlowSectionProps) {
         position: { x: START_X + i * GAP, y: ROW_Y },
         data: { agentId, index: i + 1, onSelect },
       })),
-      ...extraAgents.map((agent, i) => ({
+      ...localizedExtraAgents.map((agent, i) => ({
         id: agent.id,
         type: "customAgent",
         position: { x: START_X + (AGENT_ORDER.length + i) * GAP, y: ROW_Y },
@@ -77,7 +84,7 @@ export function FlowSection({ onSelect, extraAgents }: FlowSectionProps) {
         data: { index: totalAgents + 1, onSelect: () => onSelect("employee-file") },
       },
     ],
-    [onSelect, extraAgents, centerX, totalAgents]
+    [onSelect, localizedExtraAgents, centerX, totalAgents]
   );
 
   const edges: Edge[] = useMemo(() => {

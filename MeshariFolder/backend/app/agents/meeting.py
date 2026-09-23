@@ -21,7 +21,7 @@ rather than call_with_tool.
 """
 from sqlalchemy.orm import Session
 
-from app.agents import hr, manager, mentor
+from app.agents import coach , hr, manager, mentor
 from app.agents.llm_client import call_agentic
 from app.models import (
     AgentCatalog,
@@ -52,13 +52,10 @@ PERSONA: dict[AgentType, str] = {
         "methodology. Be specific and grounded in what they're actually "
         "working on, not textbook generalities."
     ),
-    AgentType.CAREER_COACH: (
-        "You are the Career Coach at Venv, helping a recent graduate with "
-        "their resume, interview prep, and career questions — separate "
-        "from their day-to-day task work. Be direct and practical, the "
-        "way a good career mentor would be, not generic motivational "
-        "advice."
-    ),
+
+    AgentType.CAREER_COACH: coach.SYSTEM_PROMPT,
+
+
     AgentType.DEVOPS: (
         "You are the DevOps agent at Venv, helping a recent graduate with "
         "CI/CD, deployment, and infrastructure-as-code questions. Be "
@@ -150,15 +147,28 @@ def send_message(
         }
         for m in history
     ]
-    system = PERSONA[agent] + _MEETING_FRAMING + "\n\n" + _shared_context(db, user)
+    shared_context = _shared_context(db, user)
 
-    reply_obj = call_agentic(
-        system=system,
-        messages=messages,
-        tools=[],
-        max_tokens=1000,
-    )
-    reply_text = reply_obj.text or "Sorry, I didn't catch that — could you rephrase?"
+    if agent == AgentType.CAREER_COACH:
+        reply_text = coach.generate_reply(
+            db=db,
+            user=user,
+            messages=messages,
+        )
+    else:
+        system = PERSONA[agent] + _MEETING_FRAMING + "\n\n" + shared_context
+
+        reply_obj = call_agentic(
+            system=system,
+            messages=messages,
+            tools=[],
+            max_tokens=1000,
+        )
+
+        reply_text = (
+            reply_obj.text
+            or "Sorry, I didn't catch that — could you rephrase?"
+        )
 
     reply = ChatMessage(
         user_id=user.id,

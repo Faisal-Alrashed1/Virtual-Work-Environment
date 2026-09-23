@@ -7,7 +7,7 @@ import type { Dashboard } from "@/lib/dashboard";
 import type { Review } from "@/lib/reviews";
 import type { ExtraAgent } from "@/lib/team";
 import { timeAgo } from "@/lib/format";
-import { useAgents, useLocale } from "@/lib/i18n/locale";
+import { localizeExtraAgent, useAgents, useLocale } from "@/lib/i18n/locale";
 
 interface AgentCardsProps {
   dashboard: Dashboard;
@@ -109,12 +109,15 @@ function AgentCard({ id, meta, dashboard, reviews, index }: {
 export function AgentCards({ dashboard, reviews, extraAgents }: AgentCardsProps) {
   const { t } = useLocale();
   const agents = useAgents();
+  const localizedExtraAgents = extraAgents.map((agent) =>
+  localizeExtraAgent(agent, t)
+);
   return (
     <div className="grid gap-3 sm:grid-cols-3">
       {AGENT_ORDER.map((id, i) => (
         <AgentCard key={id} id={id} meta={agents[id]} dashboard={dashboard} reviews={reviews} index={i} />
       ))}
-      {extraAgents.map((agent, i) => (
+      {localizedExtraAgents.map((agent, i) => (
         <motion.div
           key={agent.id}
           initial={{ opacity: 0, y: 8 }}

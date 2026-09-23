@@ -224,3 +224,221 @@ BEHAVIORAL_REVIEW_TOOL = {
         "required": ["summary", "consistency_rating"],
     },
 }
+CREATE_CAREER_PLAN_TOOL = {
+    "name": "create_career_plan",
+    "description": (
+        "Create a practical career plan for the trainee based on their "
+        "current skills, strengths, growth areas, and review history."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "current_position": {
+                "type": "string",
+                "description": "Short assessment of the trainee's current career position.",
+            },
+            "skill_gaps": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "The most important skill gaps to address.",
+            },
+            "short_term_goals": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 3,
+                "maxItems": 3,
+                "description": "Exactly three practical short-term career goals.",
+            },
+            "actions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Concrete actions the trainee should take.",
+            },
+            "next_step": {
+                "type": "string",
+                "description": "The recommended next career step.",
+            },
+        },
+        "required": [
+            "current_position",
+            "skill_gaps",
+            "short_term_goals",
+            "actions",
+            "next_step",
+        ],
+    },
+}
+
+
+ANALYZE_SKILL_GAPS_TOOL = {
+    "name": "analyze_skill_gaps",
+    "description": (
+        "Analyze the trainee's current skills and identify the most important "
+        "career-related gaps to improve."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "strengths": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "gaps": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "priorities": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Skill gaps ordered by what should be improved first.",
+            },
+            "recommendation": {
+                "type": "string",
+            },
+        },
+        "required": ["strengths", "gaps", "priorities", "recommendation"],
+    },
+}
+
+
+PREPARE_INTERVIEW_TOOL = {
+    "name": "prepare_interview",
+    "description": (
+        "Prepare the trainee for a job interview based on their career track, "
+        "skills, strengths, and growth areas."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "focus_areas": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "practice_questions": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "preparation_tips": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        "required": [
+            "focus_areas",
+            "practice_questions",
+            "preparation_tips",
+        ],
+    },
+}
+
+REVIEW_RESUME_TOOL = {
+    "name": "review_resume",
+    "description": (
+        "Review the trainee's resume/CV and provide structured, practical "
+        "improvements based on their career track and current experience."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "strengths": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "weak_sections": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "missing_skills": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "improvements": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "suggested_summary": {
+                "type": "string",
+                "description": "A suggested improved professional summary.",
+            },
+        },
+        "required": [
+            "strengths",
+            "weak_sections",
+            "missing_skills",
+            "improvements",
+            "suggested_summary",
+        ],
+    },
+}
+
+
+BUILD_PORTFOLIO_PLAN_TOOL = {
+    "name": "build_portfolio_plan",
+    "description": (
+        "Create a practical portfolio development plan based on the trainee's "
+        "skills, project experience, career track, and review history."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "projects_to_showcase": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "skills_to_highlight": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "missing_project_types": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "portfolio_actions": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        "required": [
+            "projects_to_showcase",
+            "skills_to_highlight",
+            "missing_project_types",
+            "portfolio_actions",
+        ],
+    },
+}
+
+GENERAL_CAREER_ADVICE_TOOL = {
+    "name": "general_career_advice",
+    "description": (
+        "Provide practical general career coaching when the user's request "
+        "does not specifically require a career plan, skill-gap analysis, "
+        "interview preparation, resume review, or portfolio planning."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "advice": {
+                "type": "string",
+                "description": "Clear and practical career advice.",
+            },
+            "recommended_actions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Concrete actions the trainee can take next.",
+            },
+        },
+        "required": [
+            "advice",
+            "recommended_actions",
+        ],
+    },
+}
+
+CAREER_COACH_TOOLS = [
+    CREATE_CAREER_PLAN_TOOL,
+    ANALYZE_SKILL_GAPS_TOOL,
+    PREPARE_INTERVIEW_TOOL,
+    REVIEW_RESUME_TOOL,
+    BUILD_PORTFOLIO_PLAN_TOOL,
+    GENERAL_CAREER_ADVICE_TOOL,
+]

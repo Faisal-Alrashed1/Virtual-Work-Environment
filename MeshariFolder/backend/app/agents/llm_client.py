@@ -243,46 +243,132 @@ def call_agentic(
     tools: list[dict],
     max_tokens: int = 1500,
     tier: str = "main",
+    tool_choice: str | None = None,
 ) -> AgentReply:
     chain = resolve_provider_chain(tier)
+
     if not chain:
         raise LLMConfigError(NO_PROVIDER_CONFIGURED)
+
     errors = []
+
     for provider in chain:
         try:
             model_name = _model_name_for(provider, tier)
-            if provider == "anthropic":
-                response = _anthropic().messages.create(
-                    model=model_name,
-                    max_tokens=max_tokens,
-                    system=system,
-                    messages=messages,
-                    tools=tools,
-                )
-                text = next((b.text for b in response.content if b.type == "text" and b.text), None)
-                calls = [ToolCall(b.name, b.input) for b in response.content if b.type == "tool_use"]
-                logger.info("[LLM] %s (%s, %s-tier) -> reply", provider, model_name, tier)
-                return AgentReply(text=text, tool_calls=calls)
 
+            # Anthropic
+            if provider == "anthropic":
+                anthropic_kwargs = {
+                    "model": model_name,
+                    "max_tokens": max_tokens,
+                    "system": system,
+                    "messages": messages,
+                    "tools": tools,
+                }
+
+                if tool_choice == "required" and tools:
+                    anthropic_kwargs["tool_choice"] = {"type": "any"}
+
+                response = _anthropic().messages.create(
+                    **anthropic_kwargs
+                )
+
+                text = next(
+                    (
+                        block.text
+                        for block in response.content
+                        if block.type == "text" and block.text
+                    ),
+                    None,
+                )
+
+                calls = [
+                    ToolCall(block.name, block.input)
+                    for block in response.content
+                    if block.type == "tool_use"
+                ]
+
+                logger.info(
+                    "[LLM] %s (%s, %s-tier) -> reply",
+                    provider,
+                    model_name,
+                    tier,
+                )
+
+                return AgentReply(
+                    text=text,
+                    tool_calls=calls,
+                )
+
+            # OpenAI-compatible providers:
+            # OpenAI, DeepSeek, Qwen
             client = _openai_compatible(provider)
-            oa_messages = [{"role": "system", "content": system}] + [
-                {**m, "content": _to_openai_content(m["content"])} for m in messages
+
+            oa_messages = [
+                {
+                    "role": "system",
+                    "content": system,
+                }
+            ] + [
+                {
+                    **message,
+                    "content": _to_openai_content(
+                        message["content"]
+                    ),
+                }
+                for message in messages
             ]
+
+            openai_kwargs = {
+                "model": model_name,
+                "max_tokens": max_tokens,
+                "messages": oa_messages,
+                "tools": (
+                    [_to_openai_tool(tool) for tool in tools]
+                    if tools
+                    else None
+                ),
+            }
+
+            if tool_choice == "required" and tools:
+                openai_kwargs["tool_choice"] = "required"
+
             response = client.chat.completions.create(
-                model=model_name,
-                max_tokens=max_tokens,
-                messages=oa_messages,
-                tools=[_to_openai_tool(t) for t in tools] if tools else None,
+                **openai_kwargs
             )
+
             msg = response.choices[0].message
+
             calls = [
-                ToolCall(c.function.name, json.loads(c.function.arguments))
-                for c in (msg.tool_calls or [])
+                ToolCall(
+                    call.function.name,
+                    json.loads(call.function.arguments),
+                )
+                for call in (msg.tool_calls or [])
             ]
-            logger.info("[LLM] %s (%s, %s-tier) -> reply", provider, model_name, tier)
-            return AgentReply(text=msg.content, tool_calls=calls)
+
+            logger.info(
+                "[LLM] %s (%s, %s-tier) -> reply",
+                provider,
+                model_name,
+                tier,
+            )
+
+            return AgentReply(
+                text=msg.content,
+                tool_calls=calls,
+            )
+
         except FAILOVER_EXCEPTIONS as e:
-            logger.warning("[LLM] %s unavailable (%s) — failing over", provider, e)
+            logger.warning(
+                "[LLM] %s unavailable (%s) — failing over",
+                provider,
+                e,
+            )
             errors.append(f"{provider}: {e}")
             continue
-    raise RuntimeError(f"{ALL_PROVIDERS_FAILED}:\n" + "\n".join(errors))
+
+    raise RuntimeError(
+        f"{ALL_PROVIDERS_FAILED}:\n"
+        + "\n".join(errors)
+    )

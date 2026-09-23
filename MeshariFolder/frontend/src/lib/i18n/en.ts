@@ -398,6 +398,12 @@ const en = {
       description:
         "Reads your review history and the employee file to keep a running summary of your strengths and growth areas.",
     },
+    career_coach: {
+      name: "Career coach",
+      role: "Supports your career growth",
+      description:
+        "Helps with career planning, skill-gap analysis, resume feedback, interview preparation, and portfolio development.",
+        },
   },
   tracks: {
     junior_dev: "General / Junior Developer",
