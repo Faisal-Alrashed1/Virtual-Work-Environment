@@ -28,7 +28,9 @@ SYSTEM_PROMPT = (
     "content is available, use review_resume.\n"
     "- If the user asks for help building or improving a portfolio, "
     "use build_portfolio_plan.\n"
-    "- For general career coaching questions, respond normally without using a tool.\n"
+    "- For general career coaching questions, use the general_career_advice tool.\n"
+    "- Always respond in the same language as the user.\n"
+    "- If the user writes in Arabic, respond naturally in Arabic.\n"
     "- Select only the tool that best matches the user's main intent."
 )
 

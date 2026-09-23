@@ -161,6 +161,21 @@ export interface AgentDisplay {
   colorVar: string | null;
 }
 
+export function localizeExtraAgent(
+  agent: ExtraAgent,
+  t: (path: string, vars?: Record<string, string | number>) => string
+): ExtraAgent {
+  if (agent.id !== "career_coach") {
+    return agent;
+  }
+
+  return {
+    ...agent,
+    name: t("agents.career_coach.name"),
+    description: t("agents.career_coach.description"),
+  };
+}
+
 /** Plain function, not a hook — safe to call inside a .map() over a
  * message list or agent roster. Takes the already-resolved `agents`
  * dict (from useAgents(), called once by the component) rather than
