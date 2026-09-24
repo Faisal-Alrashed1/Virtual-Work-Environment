@@ -150,6 +150,37 @@ mentioned the hardcoded secrets.
 
 ---
 
+## 4. Workspace: the agents thread no longer shows up empty
+
+**Owner of the code:** Frontend (`frontend/src/app/workspace/page.tsx`).
+
+**What was wrong:** `GET /tasks` (and the start/submit endpoints) return
+tasks *without* their thread; only `GET /tasks/{id}` includes it. The page
+replaced tasks with those thread-less versions, so the agents panel went
+blank in three cases:
+1. **On page load:** a task is auto-selected, but its thread was only
+   loaded on click — the panel said "No discussion yet" even with 5 messages.
+2. **Clicking "Start this task":** the response has no thread, and it
+   replaced the task — the Manager's "New task" message disappeared.
+3. **Switching language (AR/EN):** `t` from `useLocale` is recreated when
+   the locale changes, which re-runs `refresh()`, which replaced every task
+   with its thread-less version.
+
+**What changed (`workspace/page.tsx` only):**
+- New `keepThread(next, prev)`: when a task comes back without messages,
+  keep the thread already loaded for it (a thread never shrinks). Used in
+  `refresh()`, after "Start", and after submitting.
+- New `loadThread(id)` + an effect on `selectedId`: the thread loads
+  whenever a task becomes selected — on page load, after "Ask manager", or
+  on click. Clicking the task that's already open reloads its thread.
+
+**How it was checked** (in the browser; there's no frontend test setup yet):
+the thread shows on load without clicking; it survives switching to Arabic
+and back; a todo task's thread message is still there after "Start this
+task". `npm run lint` and `npx tsc --noEmit` are clean.
+
+---
+
 ## Config note (not a code change)
 
 `qwen/qwen3.7-flash` via OpenRouter **does not reliably follow a forced tool
@@ -160,8 +191,6 @@ in your `backend/.env` (about the same price, verified to work).
 
 ## Known issues not fixed yet
 
-- `/workspace`: the agents thread shows as empty on first load until the task
-  is clicked.
 - Timestamps display 3 hours off ("3h ago" for something just created) —
   likely naive UTC shown as local time.
 - GitHub's unauthenticated limit is 60 requests/hour; a few submissions with
