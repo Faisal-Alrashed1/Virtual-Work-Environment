@@ -38,9 +38,10 @@ plain Python.
   the Mentor first (`mentor_consult` param, see below); and, in the
   roundtable, reads the whole team's discussion and posts a synthesis.
 - **Mentor** (`mentor.py`) — reads a submission (GitHub link via
-  `github_client.py`, free text, and/or image attachments as real vision
-  content blocks — any combination, not github_link-specifically since
-  Stage 2), writes a structured `Review` (`kind="task_review"`,
+  `github_client.py`, free text, image attachments as real vision
+  content blocks, and the actual content of uploaded code/text/notebook
+  files via `submission_files.py` — any combination; see
+  `docs/TEAM_CHANGES.md` #1), writes a structured `Review` (`kind="task_review"`,
   `metrics_json` = verdict + rubric + inline comments — `tools.py`'s
   `SUBMIT_REVIEW_TOOL`), posts a summary message, and moves the task to
   `reviewed` on `approved` or back to `in_progress` on `needs_changes`
@@ -147,7 +148,7 @@ agents/
 ├── security_reviewer.py # review_task — real repo/dependency analysis, structured findings
 ├── data_reviewer.py     # review_task — real notebook analysis, structured findings
 ├── submission_files.py  # reads uploaded attachments' content (text/code/notebooks) —
-│                         #   shared; Mentor/Manager still only see names today
+│                         #   shared by Mentor/Security/Data; Manager doesn't use it yet
 ├── static_checks.py     # rule-based checks run before the LLM (hardcoded secrets,
 │                         #   data leakage) — a match is always kept in the findings
 ├── co_reviewers.py     # the simpler parallel fallback (see roundtable.py)
