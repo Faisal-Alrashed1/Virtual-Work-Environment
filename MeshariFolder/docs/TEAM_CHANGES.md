@@ -181,6 +181,32 @@ task". `npm run lint` and `npx tsc --noEmit` are clean.
 
 ---
 
+## 5. Times no longer show 3 hours off
+
+**Owner of the code:** Frontend (`frontend/src/lib/format.ts`).
+
+**What was wrong:** the backend stores UTC times (`datetime.utcnow()`) and
+the API sends them with no timezone suffix, e.g. `2026-09-24T17:05:20`.
+JavaScript reads a date-time with no suffix as *local* time, so in Riyadh
+(UTC+3) every time was 3 hours off: "3h ago" for something just created.
+
+**What changed:** new `parseServerTime()` in `lib/format.ts` reads a
+suffix-less date-time as UTC (strings that already have `Z` or an offset
+are left alone). `timeAgo` and `timeUntil` use it — every relative time in
+the app goes through those two, so this is the only file changed. The API
+itself is unchanged.
+
+**Heads-up — deadlines now show later than before, and that's the correct
+time.** Deadlines are stored as 23:59:59 **UTC** (see "Known issues" below),
+which is 02:59 in Riyadh, and that's when the backend actually marks a task
+late. The UI used to show them 3 hours earlier than that.
+
+**How it was checked** (browser): a message posted a moment ago shows "just
+now" and one from 4 minutes earlier shows "4m ago" (both showed "3h ago"
+before). `npm run lint` and `npx tsc --noEmit` are clean.
+
+---
+
 ## Config note (not a code change)
 
 `qwen/qwen3.7-flash` via OpenRouter **does not reliably follow a forced tool
@@ -191,7 +217,12 @@ in your `backend/.env` (about the same price, verified to work).
 
 ## Known issues not fixed yet
 
-- Timestamps display 3 hours off ("3h ago" for something just created) —
-  likely naive UTC shown as local time.
+- **Deadlines are end-of-day UTC, not end-of-day Saudi time.**
+  `scheduling.n_workdays_from` works on UTC dates, so a subtask's deadline
+  is 23:59:59 UTC = 02:59 the next morning in Riyadh, and the Fri/Sat
+  weekend check runs on the UTC date (between 00:00 and 03:00 Riyadh time
+  the UTC date is still the previous day). HR's attendance (`hr._active_days`)
+  also counts UTC dates. Fixing it means computing these in `Asia/Riyadh`;
+  it changes when work counts as late, so it needs a team decision first.
 - GitHub's unauthenticated limit is 60 requests/hour; a few submissions with
   GitHub links use it up. Planned fix: an optional `GITHUB_TOKEN`.
