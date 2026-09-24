@@ -25,7 +25,10 @@ SYSTEM_PROMPT = (
     "repo, the notes they left, or the images/files they attached — not "
     "generic advice. Only judge files whose content you were actually "
     "shown — if a file couldn't be opened, say so instead of guessing "
-    "what's in it. Score each rubric category 1-5. Use 'needs_changes' "
+    "what's in it. You can't approve work you haven't seen: if the "
+    "deliverable itself isn't in what you were shown (only a file you "
+    "couldn't open, or notes describing work without the work), use "
+    "'needs_changes' and say what's missing. Score each rubric category 1-5. Use 'needs_changes' "
     "only when something genuinely blocks the task's goal — minor gaps "
     "(missing tests, thin docs) can still be 'approved' with a comment "
     "about what to improve next time, the way a real early-career review "
@@ -45,6 +48,13 @@ def review_task(db: Session, task: Task, user: User) -> Review:
 
     if not task.github_link and not task.submission_text and not task.attachments:
         raise ValueError("Task has no submission to review yet.")
+
+    # Only files that can't be opened (a PDF, a zip...) and nothing else:
+    # there's no work to look at. Asking the model anyway is what made it
+    # invent a whole review — in a live test it "approved" a CV PDF as a
+    # finished project setup with 5/5. Decide this in code instead.
+    if not (task.github_link or task.submission_text or readable_files or images):
+        return _save_review(db, task, user, _not_reviewable(unreadable_files))
 
     parts = [f"Task assigned: {task.title}\n{task.description}\n"]
     if task.github_link:
@@ -90,7 +100,38 @@ def review_task(db: Session, task: Task, user: User) -> Review:
         force_tool="submit_review",
         max_tokens=2000,
     )
-    data = result["input"]
+    return _save_review(db, task, user, result["input"])
+
+
+def _not_reviewable(unreadable_files: list[str]) -> dict:
+    """A needs_changes review with no rubric scores — nothing was scored,
+    so there's nothing to average (dashboard.py and the growth view both
+    skip reviews without categories)."""
+    return {
+        "verdict": "needs_changes",
+        "summary": (
+            "I couldn't review this submission: I can't open "
+            + ", ".join(unreadable_files)
+            + ". Only code/text files, notebooks, images, notes, or a GitHub "
+            "link can be reviewed here, and nothing I can see shows the task "
+            "was done, so I can't approve it yet. Please upload the actual "
+            "work (e.g. your .py files and requirements.txt) or link a public "
+            "GitHub repo, then resubmit."
+        ),
+        "categories": [],
+        "comments": [],
+        "not_reviewable": True,
+    }
+
+
+def _save_review(db: Session, task: Task, user: User, data: dict) -> Review:
+    metrics = {
+        "verdict": data["verdict"],
+        "categories": data["categories"],
+        "comments": data["comments"],
+    }
+    if data.get("not_reviewable"):
+        metrics["not_reviewable"] = True
 
     review = Review(
         user_id=user.id,
@@ -99,11 +140,7 @@ def review_task(db: Session, task: Task, user: User) -> Review:
         agent_type=AgentType.MENTOR,
         kind=ReviewKind.TASK_REVIEW,
         content=data["summary"],
-        metrics_json={
-            "verdict": data["verdict"],
-            "categories": data["categories"],
-            "comments": data["comments"],
-        },
+        metrics_json=metrics,
     )
     db.add(review)
 

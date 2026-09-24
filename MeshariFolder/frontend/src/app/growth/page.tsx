@@ -91,7 +91,9 @@ export default function GrowthPage() {
   }
 
   const mentorReviews = reviews.filter((r) => r.agentType === "mentor" && r.taskId);
-  const chartData = mentorReviews.map((r) => ({
+  // A review with no rubric scores (the Mentor couldn't open anything
+  // submitted) isn't a 0/5 — leave it out of the score trend.
+  const chartData = mentorReviews.filter((r) => r.categories.length > 0).map((r) => ({
     label: r.content.slice(0, 24),
     score: Number(averageScore(r).toFixed(2)),
   }));
@@ -262,7 +264,9 @@ export default function GrowthPage() {
                         </p>
                       </div>
                       <span className="font-mono text-xs text-text-secondary">
-                        {averageScore(review).toFixed(2)}/5
+                        {review.categories.length > 0
+                          ? `${averageScore(review).toFixed(2)}/5`
+                          : "—"}
                       </span>
                     </Link>
                   ))}

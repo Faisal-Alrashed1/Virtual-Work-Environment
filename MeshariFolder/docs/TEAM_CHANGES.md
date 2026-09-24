@@ -207,6 +207,43 @@ before). `npm run lint` and `npx tsc --noEmit` are clean.
 
 ---
 
+## 6. The Mentor can't approve work it couldn't see
+
+**Owner of the code:** Mentor (`app/agents/mentor.py`) + frontend growth
+view (`frontend/src/app/growth/page.tsx`).
+
+**What was wrong:** found by Fahad testing by hand — he uploaded his CV (a
+PDF) as the submission for "Set up project structure and virtual
+environment". The Mentor can't open PDFs, so all it had was the file name,
+and the model **invented a whole review**: it described `data/`, `src/`,
+`tests/` folders, a virtual environment and a `requirements.txt` that
+didn't exist, **approved the task, and scored it 5/5**. The Manager's
+synthesis then congratulated him on it. That approval also counts toward
+HR's evaluation of the graduate. (The Security/Data Reviewers handled it
+correctly — they already had a guard for this, see #0.)
+
+**What changed:**
+- `mentor.py`: if a submission has no GitHub link, no notes, no readable
+  file, and no image — only files that can't be opened — the review is
+  decided **in code, with no LLM call**: `needs_changes`, no rubric scores,
+  `"not_reviewable": true` in `metrics_json`, and a message naming the file
+  and saying what to upload. The task goes back to `in_progress`.
+- A line in `SYSTEM_PROMPT`: it can't approve work it hasn't seen, for the
+  mixed cases (e.g. notes that describe the work plus an unreadable file).
+- Notes-only and image-only submissions are **still reviewed** as before.
+- `growth/page.tsx`: a review with no rubric scores shows "—" instead of
+  "0.00/5" and is left out of the score chart (the backend dashboard
+  average already skipped these).
+
+**Result in the live test** (same situation: a PDF only): the Mentor says it
+can't open the PDF and can't approve, the task is back in progress, no
+scores are stored, and the only LLM call is the Manager's synthesis (which
+now correctly asks for the actual files).
+
+**Check it:** `python smoke_test_mentor_file_reading.py`.
+
+---
+
 ## Config note (not a code change)
 
 `qwen/qwen3.7-flash` via OpenRouter **does not reliably follow a forced tool
@@ -214,6 +251,12 @@ call**: it sometimes answers in plain text, sometimes returns broken JSON.
 That breaks CV upload (onboarding) and every structured review. If you use
 Qwen through OpenRouter, set `QWEN_SMALL_MODEL=qwen/qwen3-30b-a3b-instruct-2507`
 in your `backend/.env` (about the same price, verified to work).
+
+If `/growth` shows "Module not found: Can't resolve 'victory-vendor/d3-scale'",
+your `node_modules/victory-vendor` install is incomplete (its `es/` and
+`lib/` folders are missing). Fix it with
+`rm -rf node_modules/victory-vendor && npm install` in `frontend/` — the
+lockfile doesn't change.
 
 ## Known issues not fixed yet
 
