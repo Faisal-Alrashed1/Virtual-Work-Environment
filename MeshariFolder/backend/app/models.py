@@ -92,13 +92,23 @@ class WeekStatus(str, enum.Enum):
 
 
 class ReviewKind(str, enum.Enum):
-    """Distinguishes the four review shapes that now share the `reviews`
+    """Distinguishes the five review shapes that now share the `reviews`
     table — see STAGE1_PRODUCT_FLOW.md's end-of-week cascade. Each kind's
     metrics_json contract is documented at its creation site."""
     TASK_REVIEW = "task_review"        # Mentor, per submitted subtask (existing)
     WEEK_PROGRESS = "week_progress"    # Manager, end-of-week progress review
     BEHAVIORAL = "behavioral"          # HR, end-of-week attendance/consistency eval
     SKILLS_ROLLUP = "skills_rollup"    # HR, periodic Employee File rollup (existing)
+    # Security Reviewer / Data Reviewer's structured take on a submission,
+    # posted alongside the Mentor's task_review during the roundtable — see
+    # app/agents/security_reviewer.py, data_reviewer.py. metrics_json:
+    # {verdict, risk_level, findings: [{category, severity, description,
+    # recommendation}], reviewed_files, unreadable_files}. verdict is
+    # 'clear' / 'concerns_found' from the LLM, or 'not_reviewed' (set in
+    # code, risk_level None) when nothing readable was submitted. A
+    # finding with "source": "static_check" came from a rule in
+    # app/agents/static_checks.py, not the LLM.
+    SPECIALIST_REVIEW = "specialist_review"
 
 
 # ---------------------------------------------------------------------------
