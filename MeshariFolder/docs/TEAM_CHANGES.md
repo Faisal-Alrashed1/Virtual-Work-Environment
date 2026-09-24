@@ -78,6 +78,47 @@ prompt; no API key needed).
 
 ---
 
+## 2. A model that skips its tool call no longer crashes the request
+
+**Owner of the code:** LLM client (`app/agents/llm_client.py`) and onboarding
+(`app/agents/graph/onboarding_graph.py`).
+
+**What was wrong:** every agent asks the model to answer through a specific
+tool (a "forced tool call"). When a model answered in plain text instead, or
+returned broken JSON arguments, the code raised an unhandled error:
+- The request returned a **raw 500**.
+- There was **no retry and no failover** to the next provider, even though
+  the failover chain exists for exactly this kind of thing.
+- That 500 had **no CORS headers**, so the browser blocked it and the
+  frontend showed **"Can't reach the server — is the backend running?"**
+  while the backend was actually running fine. This is what happened on the
+  very first CV upload with `qwen3.7-flash`.
+
+**How it was confirmed:** sent a request with a browser `Origin` header
+while the model skipped its tool call: status 500, no
+`access-control-allow-origin` header. The existing 503 path does have it.
+
+**What changed:**
+- New `ToolCallError` in `llm_client.py` for "the model answered, but not
+  with a valid tool call" (no call, or arguments that aren't a JSON object).
+- `call_with_tool` / `call_agentic` now share one loop (`_run_chain`): a
+  `ToolCallError` is retried once on the same provider (`TOOL_CALL_ATTEMPTS
+  = 2`), then fails over like an outage. When every provider fails, it
+  raises the existing `ALL_PROVIDERS_FAILED` error, which `main.py` already
+  turns into a **503 with a readable message** (and CORS headers).
+- `onboarding_graph._forced_tool_call` follows the same policy.
+- **Unchanged on purpose:** a genuine bug (any other exception) still comes
+  back as a 500 — `smoke_test_llm_errors.py` checks this.
+
+**Result in the live test** (CV upload on `qwen3.7-flash`, 3 tries): two
+succeeded; the third failed twice in a row and came back as a 503 saying
+"model answered without calling 'generate_questions'", readable in the
+browser — before, that was the "Can't reach the server" error.
+
+**Check it:** `python smoke_test_llm_tool_call_failover.py`.
+
+---
+
 ## Config note (not a code change)
 
 `qwen/qwen3.7-flash` via OpenRouter **does not reliably follow a forced tool
@@ -90,8 +131,6 @@ in your `backend/.env` (about the same price, verified to work).
 
 - The Manager's thread replies (`manager.respond_in_thread`) don't see
   uploaded files at all, not even their names.
-- A model answering without calling its tool raises an unhandled
-  `RuntimeError` -> raw 500, with no failover to the next provider.
 - `/workspace`: the agents thread shows as empty on first load until the task
   is clicked.
 - Timestamps display 3 hours off ("3h ago" for something just created) —

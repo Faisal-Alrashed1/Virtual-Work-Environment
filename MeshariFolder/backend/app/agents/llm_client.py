@@ -64,6 +64,19 @@ FAILOVER_EXCEPTIONS = (
     OAuthErr, OPermErr, ORateErr, OConnErr, OStatusErr,
 )
 
+class ToolCallError(RuntimeError):
+    """The provider answered, but not with the forced tool call we asked
+    for: plain text instead, no tool call, or arguments that aren't valid
+    JSON. Some models do this intermittently (qwen3.7-flash via OpenRouter
+    did it constantly), so it's retried once on the same provider, then
+    failed over like an availability error — before this, it escaped as a
+    raw 500, which also lacked CORS headers, so the browser reported it as
+    "Can't reach the server"."""
+
+
+# Same-provider attempts for a ToolCallError before moving down the chain.
+TOOL_CALL_ATTEMPTS = 2
+
 # Prefix used on the final error when every provider in the chain has
 # been tried and failed. main.py checks for this prefix to return a
 # clean 503 instead of a raw 500.
@@ -184,6 +197,41 @@ def _to_openai_content(content):
     return out
 
 
+def _parse_tool_arguments(name: str, arguments: str) -> dict:
+    try:
+        parsed = json.loads(arguments)
+    except (json.JSONDecodeError, TypeError) as e:
+        raise ToolCallError(f"'{name}' arguments weren't valid JSON ({e})") from e
+    if not isinstance(parsed, dict):
+        raise ToolCallError(f"'{name}' arguments weren't a JSON object")
+    return parsed
+
+
+def _run_chain(chain: list[str], attempt, what: str):
+    """Tries attempt(provider) down the chain. An availability error moves
+    straight to the next provider; a ToolCallError is retried on the same
+    provider first (TOOL_CALL_ATTEMPTS), then moves on. Anything else is a
+    real bug and propagates. Raises ALL_PROVIDERS_FAILED once exhausted —
+    main.py turns that into a clean 503."""
+    errors = []
+    for provider in chain:
+        for attempt_no in range(1, TOOL_CALL_ATTEMPTS + 1):
+            try:
+                return attempt(provider)
+            except ToolCallError as e:
+                logger.warning(
+                    "[LLM] %s gave an invalid %s (attempt %d/%d): %s",
+                    provider, what, attempt_no, TOOL_CALL_ATTEMPTS, e,
+                )
+                if attempt_no == TOOL_CALL_ATTEMPTS:
+                    errors.append(f"{provider}: {e}")
+            except FAILOVER_EXCEPTIONS as e:
+                logger.warning("[LLM] %s unavailable (%s) — failing over", provider, e)
+                errors.append(f"{provider}: {e}")
+                break
+    raise RuntimeError(f"{ALL_PROVIDERS_FAILED}:\n" + "\n".join(errors))
+
+
 def call_with_tool(
     *,
     system: str,
@@ -196,44 +244,44 @@ def call_with_tool(
     chain = resolve_provider_chain(tier)
     if not chain:
         raise LLMConfigError(NO_PROVIDER_CONFIGURED)
-    errors = []
-    for provider in chain:
-        try:
-            model_name = _model_name_for(provider, tier)
-            if provider == "anthropic":
-                response = _anthropic().messages.create(
-                    model=model_name,
-                    max_tokens=max_tokens,
-                    system=system,
-                    messages=messages,
-                    tools=tools,
-                    tool_choice={"type": "tool", "name": force_tool},
-                )
-                for block in response.content:
-                    if block.type == "tool_use":
-                        logger.info("[LLM] %s (%s, %s-tier) -> %s", provider, model_name, tier, force_tool)
-                        return {"tool_name": block.name, "input": block.input}
-                raise RuntimeError(f"Model did not call '{force_tool}' as expected.")
 
-            client = _openai_compatible(provider)
-            oa_messages = [{"role": "system", "content": system}] + [
-                {**m, "content": _to_openai_content(m["content"])} for m in messages
-            ]
-            response = client.chat.completions.create(
+    def attempt(provider: str) -> dict:
+        model_name = _model_name_for(provider, tier)
+        if provider == "anthropic":
+            response = _anthropic().messages.create(
                 model=model_name,
                 max_tokens=max_tokens,
-                messages=oa_messages,
-                tools=[_to_openai_tool(t) for t in tools],
-                tool_choice={"type": "function", "function": {"name": force_tool}},
+                system=system,
+                messages=messages,
+                tools=tools,
+                tool_choice={"type": "tool", "name": force_tool},
             )
-            call = response.choices[0].message.tool_calls[0]
-            logger.info("[LLM] %s (%s, %s-tier) -> %s", provider, model_name, tier, force_tool)
-            return {"tool_name": call.function.name, "input": json.loads(call.function.arguments)}
-        except FAILOVER_EXCEPTIONS as e:
-            logger.warning("[LLM] %s unavailable (%s) — failing over", provider, e)
-            errors.append(f"{provider}: {e}")
-            continue
-    raise RuntimeError(f"{ALL_PROVIDERS_FAILED}:\n" + "\n".join(errors))
+            for block in response.content:
+                if block.type == "tool_use":
+                    logger.info("[LLM] %s (%s, %s-tier) -> %s", provider, model_name, tier, force_tool)
+                    return {"tool_name": block.name, "input": block.input}
+            raise ToolCallError(f"model answered without calling '{force_tool}'")
+
+        client = _openai_compatible(provider)
+        oa_messages = [{"role": "system", "content": system}] + [
+            {**m, "content": _to_openai_content(m["content"])} for m in messages
+        ]
+        response = client.chat.completions.create(
+            model=model_name,
+            max_tokens=max_tokens,
+            messages=oa_messages,
+            tools=[_to_openai_tool(t) for t in tools],
+            tool_choice={"type": "function", "function": {"name": force_tool}},
+        )
+        tool_calls = response.choices[0].message.tool_calls or []
+        call = next((c for c in tool_calls if c.function.name == force_tool), None)
+        if call is None:
+            raise ToolCallError(f"model answered without calling '{force_tool}'")
+        result = {"tool_name": call.function.name, "input": _parse_tool_arguments(force_tool, call.function.arguments)}
+        logger.info("[LLM] %s (%s, %s-tier) -> %s", provider, model_name, tier, force_tool)
+        return result
+
+    return _run_chain(chain, attempt, f"'{force_tool}' call")
 
 
 def call_agentic(
@@ -247,42 +295,38 @@ def call_agentic(
     chain = resolve_provider_chain(tier)
     if not chain:
         raise LLMConfigError(NO_PROVIDER_CONFIGURED)
-    errors = []
-    for provider in chain:
-        try:
-            model_name = _model_name_for(provider, tier)
-            if provider == "anthropic":
-                response = _anthropic().messages.create(
-                    model=model_name,
-                    max_tokens=max_tokens,
-                    system=system,
-                    messages=messages,
-                    tools=tools,
-                )
-                text = next((b.text for b in response.content if b.type == "text" and b.text), None)
-                calls = [ToolCall(b.name, b.input) for b in response.content if b.type == "tool_use"]
-                logger.info("[LLM] %s (%s, %s-tier) -> reply", provider, model_name, tier)
-                return AgentReply(text=text, tool_calls=calls)
 
-            client = _openai_compatible(provider)
-            oa_messages = [{"role": "system", "content": system}] + [
-                {**m, "content": _to_openai_content(m["content"])} for m in messages
-            ]
-            response = client.chat.completions.create(
+    def attempt(provider: str) -> AgentReply:
+        model_name = _model_name_for(provider, tier)
+        if provider == "anthropic":
+            response = _anthropic().messages.create(
                 model=model_name,
                 max_tokens=max_tokens,
-                messages=oa_messages,
-                tools=[_to_openai_tool(t) for t in tools] if tools else None,
+                system=system,
+                messages=messages,
+                tools=tools,
             )
-            msg = response.choices[0].message
-            calls = [
-                ToolCall(c.function.name, json.loads(c.function.arguments))
-                for c in (msg.tool_calls or [])
-            ]
+            text = next((b.text for b in response.content if b.type == "text" and b.text), None)
+            calls = [ToolCall(b.name, b.input) for b in response.content if b.type == "tool_use"]
             logger.info("[LLM] %s (%s, %s-tier) -> reply", provider, model_name, tier)
-            return AgentReply(text=msg.content, tool_calls=calls)
-        except FAILOVER_EXCEPTIONS as e:
-            logger.warning("[LLM] %s unavailable (%s) — failing over", provider, e)
-            errors.append(f"{provider}: {e}")
-            continue
-    raise RuntimeError(f"{ALL_PROVIDERS_FAILED}:\n" + "\n".join(errors))
+            return AgentReply(text=text, tool_calls=calls)
+
+        client = _openai_compatible(provider)
+        oa_messages = [{"role": "system", "content": system}] + [
+            {**m, "content": _to_openai_content(m["content"])} for m in messages
+        ]
+        response = client.chat.completions.create(
+            model=model_name,
+            max_tokens=max_tokens,
+            messages=oa_messages,
+            tools=[_to_openai_tool(t) for t in tools] if tools else None,
+        )
+        msg = response.choices[0].message
+        calls = [
+            ToolCall(c.function.name, _parse_tool_arguments(c.function.name, c.function.arguments))
+            for c in (msg.tool_calls or [])
+        ]
+        logger.info("[LLM] %s (%s, %s-tier) -> reply", provider, model_name, tier)
+        return AgentReply(text=msg.content, tool_calls=calls)
+
+    return _run_chain(chain, attempt, "tool call")
