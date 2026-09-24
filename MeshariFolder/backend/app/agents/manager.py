@@ -20,6 +20,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.agents.llm_client import call_agentic, call_with_tool
+from app.agents.submission_files import read_submitted_files
 from app.agents.tools import (
     CREATE_PROJECT_TOOL,
     PLAN_WEEK_TOOL,
@@ -238,9 +239,37 @@ def submit_week_progress(db: Session, user: User, week: Week, mentor_consult: st
     return review
 
 
+# Thread replies answer questions about a task rather than review it, and
+# happen on every message, so the Manager gets a smaller slice of each file
+# than the Mentor does. The GitHub link is passed as-is, not fetched: each
+# fetch spends GitHub's 60/hour unauthenticated limit.
+_FILE_CHARS_FOR_REPLIES = 1500
+
+
+def _submission_context(task: Task) -> str:
+    if not (task.github_link or task.submission_text or task.attachments):
+        return "Nothing has been submitted for this task yet."
+    parts = ["The graduate's current submission:"]
+    if task.github_link:
+        parts.append(f"GitHub link: {task.github_link}")
+    if task.submission_text:
+        parts.append(f"Their notes: {task.submission_text}")
+    readable, unreadable = read_submitted_files(task, max_chars_per_file=_FILE_CHARS_FOR_REPLIES)
+    for filename, text in readable:
+        parts.append(f"--- {filename} ---\n{text}")
+    if unreadable:
+        parts.append(
+            "Also attached, but not readable here (images, archives, "
+            "binaries): " + ", ".join(unreadable)
+        )
+    return "\n".join(parts)
+
+
 def respond_in_thread(db: Session, task: Task, user: User) -> TaskMessage:
     """Reads the task's thread and posts a reply. Called after the graduate
-    posts a message via POST /tasks/{id}/messages."""
+    posts a message via POST /tasks/{id}/messages. Sees the current
+    submission too (docs/TEAM_CHANGES.md #3) — before, it didn't know what
+    had been submitted at all, not even the file names."""
     history = [
         {
             "role": "assistant" if m.sender_type == SenderType.AGENT else "user",
@@ -251,7 +280,8 @@ def respond_in_thread(db: Session, task: Task, user: User) -> TaskMessage:
     system = (
         SYSTEM_PROMPT
         + f"\n\nCurrent task: {task.title} — {task.description}\n"
-        + f"Status: {task.status.value}.\n{_cv_context(user)}"
+        + f"Status: {task.status.value}.\n{_cv_context(user)}\n\n"
+        + _submission_context(task)
     )
     reply = call_agentic(
         system=system,

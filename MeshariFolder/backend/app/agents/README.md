@@ -148,7 +148,7 @@ agents/
 ├── security_reviewer.py # review_task — real repo/dependency analysis, structured findings
 ├── data_reviewer.py     # review_task — real notebook analysis, structured findings
 ├── submission_files.py  # reads uploaded attachments' content (text/code/notebooks) —
-│                         #   shared by Mentor/Security/Data; Manager doesn't use it yet
+│                         #   shared by Mentor/Security/Data and the Manager's thread replies
 ├── static_checks.py     # rule-based checks run before the LLM (hardcoded secrets,
 │                         #   data leakage) — a match is always kept in the findings
 ├── co_reviewers.py     # the simpler parallel fallback (see roundtable.py)

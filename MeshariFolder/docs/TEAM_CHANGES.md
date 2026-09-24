@@ -119,6 +119,37 @@ browser — before, that was the "Can't reach the server" error.
 
 ---
 
+## 3. The Manager sees the submission when replying in a task thread
+
+**Owner of the code:** Manager (`app/agents/manager.py`,
+`respond_in_thread`).
+
+**What was wrong:** when the graduate posts in a task thread, the Manager's
+prompt had the task title, status, CV context, and the thread — but nothing
+about what was submitted, not even file names. "Is my app.py okay?" got a
+guess.
+
+**What changed:**
+- New `_submission_context(task)` in `manager.py`: the GitHub link, the
+  graduate's notes, and uploaded file content (via
+  `submission_files.read_submitted_files`), plus the names of files that
+  can't be read. Added to the system prompt of `respond_in_thread`.
+- Files are cut to **1,500 chars each** (the Mentor gets 4,000): thread
+  replies answer questions rather than review, and happen on every message,
+  so this keeps the cost down.
+- The GitHub link is passed as text, **not fetched**, so thread replies
+  don't spend GitHub's 60-requests/hour limit.
+- `create_project`, `plan_week`, `submit_week_progress`, and the
+  roundtable synthesis are unchanged.
+
+**Result in the live test:** asked "Is there anything risky in my app.py?",
+the Manager quoted the vulnerable SQL line, gave the parameterized fix, and
+mentioned the hardcoded secrets.
+
+**Check it:** `python smoke_test_manager_sees_submission.py`.
+
+---
+
 ## Config note (not a code change)
 
 `qwen/qwen3.7-flash` via OpenRouter **does not reliably follow a forced tool
@@ -129,8 +160,6 @@ in your `backend/.env` (about the same price, verified to work).
 
 ## Known issues not fixed yet
 
-- The Manager's thread replies (`manager.respond_in_thread`) don't see
-  uploaded files at all, not even their names.
 - `/workspace`: the agents thread shows as empty on first load until the task
   is clicked.
 - Timestamps display 3 hours off ("3h ago" for something just created) —
