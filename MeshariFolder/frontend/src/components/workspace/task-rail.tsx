@@ -1,8 +1,7 @@
 "use client";
 
 import { STATUS_ORDER, type Task, type TaskStatus } from "@/lib/tasks";
-import { timeUntil } from "@/lib/format";
-import { useLocale, useStatusLabels } from "@/lib/i18n/locale";
+import { useLocale, useStatusLabels, useRelativeTime } from "@/lib/i18n/locale";
 
 interface TaskRailProps {
   tasks: Task[];
@@ -27,6 +26,7 @@ export function TaskRail({
   assigning,
 }: TaskRailProps) {
   const { t } = useLocale();
+  const { timeUntil } = useRelativeTime();
   const statusLabels = useStatusLabels();
   const grouped: Record<TaskStatus, Task[]> = {
     todo: [],

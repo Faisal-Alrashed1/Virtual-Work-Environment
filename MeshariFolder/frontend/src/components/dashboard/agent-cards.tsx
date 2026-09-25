@@ -6,8 +6,7 @@ import { AGENT_ORDER, type AgentId, type AgentMeta } from "@/lib/agents";
 import type { Dashboard } from "@/lib/dashboard";
 import type { Review } from "@/lib/reviews";
 import type { ExtraAgent } from "@/lib/team";
-import { timeAgo } from "@/lib/format";
-import { useAgents, useLocale } from "@/lib/i18n/locale";
+import { useAgents, useLocale, useRelativeTime } from "@/lib/i18n/locale";
 
 interface AgentCardsProps {
   dashboard: Dashboard;
@@ -24,6 +23,7 @@ function useAgentStatus(
   reviews: Review[]
 ): { line: string; meta: string | null } {
   const { t, tPlural } = useLocale();
+  const { timeAgo } = useRelativeTime();
   if (id === "manager") {
     if (!dashboard.hasActiveProject)
       return { line: t("agentCards.waitingSetup"), meta: null };

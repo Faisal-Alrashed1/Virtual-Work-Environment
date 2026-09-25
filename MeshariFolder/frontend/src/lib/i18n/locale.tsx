@@ -6,6 +6,7 @@ import en from "./en";
 import ar from "./ar";
 import type { Dictionary } from "./en";
 import { AGENT_COLOR_VAR, type AgentId, type AgentMeta } from "@/lib/agents";
+import { timeAgo, timeUntil, type RelativeTimeLabels } from "@/lib/format";
 import { STATUS_ORDER, type TaskStatus } from "@/lib/tasks";
 import { SELECTABLE_ONLY_TRACKS, TRACK_ORDER } from "@/lib/tracks";
 import type { ApiTrack } from "@/lib/api";
@@ -189,14 +190,36 @@ export interface AgentDisplay {
 export function resolveAgentDisplay(
   id: string,
   agents: Record<AgentId, AgentMeta>,
-  extraAgents: ExtraAgent[]
+  extraAgents: ExtraAgent[],
+  extraNames: Record<string, string> = {}
 ): AgentDisplay {
   if (id in agents) {
     const m = agents[id as AgentId];
     return { name: m.name, role: m.role, colorVar: m.colorVar };
   }
   const extra = extraAgents.find((a) => a.id === id);
-  return { name: extra?.name ?? id, role: extra?.description ?? "", colorVar: null };
+  return { name: extraNames[id] ?? extra?.name ?? id, role: extra?.description ?? "", colorVar: null };
+}
+
+/** The optional agents' names in the current locale, keyed by catalog id —
+ * pass to resolveAgentDisplay. Unknown ids fall back to the catalog name. */
+export function useExtraAgentNames(): Record<string, string> {
+  const { tRaw } = useLocale();
+  return tRaw<Record<string, string>>("extraAgentNames");
+}
+
+/** timeAgo / timeUntil in the current locale ("3h ago" / "قبل 3 ساعة").
+ * Call once at the top of a component, like useAgents. */
+export function useRelativeTime(): {
+  timeAgo: (iso: string) => string;
+  timeUntil: (iso: string) => string;
+} {
+  const { tRaw } = useLocale();
+  const labels = tRaw<RelativeTimeLabels>("time");
+  return {
+    timeAgo: (iso) => timeAgo(iso, labels),
+    timeUntil: (iso) => timeUntil(iso, labels),
+  };
 }
 
 /** The four task-status labels (To do / In progress / Submitted /

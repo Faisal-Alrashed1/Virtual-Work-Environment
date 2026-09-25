@@ -16,8 +16,7 @@ import { ApiError } from "@/lib/api";
 import { fetchEmployeeFile, type EmployeeFile } from "@/lib/employee-file";
 import { api } from "@/lib/api";
 import { averageScore, fetchMyReviews, type Review } from "@/lib/reviews";
-import { timeAgo } from "@/lib/format";
-import { useAgents, useLocale } from "@/lib/i18n/locale";
+import { useAgents, useLocale, useRelativeTime } from "@/lib/i18n/locale";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleToggle } from "@/components/locale-toggle";
 
@@ -48,6 +47,7 @@ function ChartTooltip({
 export default function GrowthPage() {
   const { user, loading: authLoading } = useRequireAuth();
   const { t } = useLocale();
+  const { timeAgo } = useRelativeTime();
   const { hr } = useAgents();
 
   const [employeeFile, setEmployeeFile] = useState<EmployeeFile | null>(null);

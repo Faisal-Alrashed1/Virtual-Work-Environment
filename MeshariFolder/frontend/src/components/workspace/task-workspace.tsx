@@ -4,9 +4,8 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { GitPullRequest, Calendar, CircleAlert, CircleCheck, Clock, Paperclip, X } from "lucide-react";
 import { STATUS_ORDER, type Task } from "@/lib/tasks";
-import { timeUntil, timeAgo } from "@/lib/format";
 import { AttachmentList } from "@/components/workspace/attachment-list";
-import { useAgents, useLocale, useStatusLabels } from "@/lib/i18n/locale";
+import { useAgents, useLocale, useStatusLabels, useRelativeTime } from "@/lib/i18n/locale";
 
 export interface SubmitPayload {
   githubLink?: string;
@@ -26,6 +25,7 @@ const MAX_FILES = 5;
 
 export function TaskWorkspace({ task, busy, onAdvance, discussion }: TaskWorkspaceProps) {
   const { t } = useLocale();
+  const { timeAgo, timeUntil } = useRelativeTime();
   const agents = useAgents();
   const statusLabels = useStatusLabels();
   const [linkDraft, setLinkDraft] = useState("");

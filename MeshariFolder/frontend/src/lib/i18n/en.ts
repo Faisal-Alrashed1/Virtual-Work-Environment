@@ -416,6 +416,27 @@ const en = {
     submitted: "Submitted",
     reviewed: "Reviewed",
   },
+  // Display names for the optional agents, keyed by catalog id. The backend
+  // catalog stores English names; this lets conversations show them in the
+  // current language (resolveAgentDisplay in lib/i18n/locale.tsx).
+  extraAgentNames: {
+    security_reviewer: "Security reviewer",
+    data_reviewer: "Data reviewer",
+    career_coach: "Career coach",
+    devops: "DevOps",
+  },
+  // Relative times — see lib/format.ts's timeAgo/timeUntil and
+  // useRelativeTime in lib/i18n/locale.tsx.
+  time: {
+    justNow: "just now",
+    minutesAgo: "{n}m ago",
+    hoursAgo: "{n}h ago",
+    daysAgo: "{n}d ago",
+    inMinutes: "in {n}m",
+    inHours: "in {n}h",
+    inDays: "in {n}d",
+    pastDue: "past due",
+  },
 };
 
 export default en;
