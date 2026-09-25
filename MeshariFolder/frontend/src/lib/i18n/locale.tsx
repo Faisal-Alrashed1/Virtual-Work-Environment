@@ -72,7 +72,18 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
  * visitor. See ThemeProvider's identical fix for the full reasoning. */
 function readAppliedLocale(): Locale {
   if (typeof document === "undefined") return "en";
-  return document.documentElement.getAttribute("lang") === "ar" ? "ar" : "en";
+  // The stored choice is the source of truth, same rule as the anti-flash
+  // script. Not <html lang>: the effect below sets that from state, and on
+  // the first mount (twice under dev StrictMode) state is still "en", so
+  // re-reading the attribute picked the reset value and Arabic was lost on
+  // every reload.
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (stored === "en" || stored === "ar") return stored;
+  } catch {
+    // storage unavailable — fall through to the browser language
+  }
+  return /^ar\b/.test(navigator.language || "") ? "ar" : "en";
 }
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
@@ -92,11 +103,19 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.setAttribute("lang", locale);
     document.documentElement.setAttribute("dir", DIR[locale]);
-    window.localStorage.setItem(STORAGE_KEY, locale);
   }, [locale]);
 
+  // Persist only on an explicit toggle. Persisting from the effect above
+  // also saved the initial "en" on every page load, overwriting a stored
+  // "ar" before it was adopted.
   function toggleLocale() {
-    setLocale((l) => (l === "en" ? "ar" : "en"));
+    const next: Locale = locale === "en" ? "ar" : "en";
+    setLocale(next);
+    try {
+      window.localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      // storage unavailable — the choice just won't survive a reload
+    }
   }
 
   function t(path: string, vars?: Record<string, string | number>): string {
