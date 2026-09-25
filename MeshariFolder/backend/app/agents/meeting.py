@@ -22,6 +22,7 @@ rather than call_with_tool.
 from sqlalchemy.orm import Session
 
 from app.agents import hr, manager, mentor
+from app.agents.language import LANGUAGE_RULE
 from app.agents.llm_client import call_agentic
 from app.agents.submission_files import read_submitted_files
 from app.models import (
@@ -203,7 +204,7 @@ def send_message(
         }
         for m in history
     ]
-    system = PERSONA[agent] + _MEETING_FRAMING + "\n\n" + _shared_context(db, user)
+    system = PERSONA[agent] + _MEETING_FRAMING + LANGUAGE_RULE + "\n\n" + _shared_context(db, user)
 
     reply_obj = call_agentic(
         system=system,

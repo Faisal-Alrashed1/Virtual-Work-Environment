@@ -19,6 +19,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.agents.language import LANGUAGE_RULE
 from app.agents.llm_client import call_agentic, call_with_tool
 from app.agents.submission_files import read_submitted_files
 from app.agents.tools import (
@@ -282,6 +283,7 @@ def respond_in_thread(db: Session, task: Task, user: User) -> TaskMessage:
         + f"\n\nCurrent task: {task.title} — {task.description}\n"
         + f"Status: {task.status.value}.\n{_cv_context(user)}\n\n"
         + _submission_context(task)
+        + LANGUAGE_RULE
     )
     reply = call_agentic(
         system=system,

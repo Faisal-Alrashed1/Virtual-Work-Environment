@@ -13,6 +13,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.agents.github_client import fetch_repo_context
+from app.agents.language import LANGUAGE_RULE
 from app.agents.llm_client import call_with_tool
 from app.agents.submission_files import read_submitted_files
 from app.agents.tools import SUBMIT_REVIEW_TOOL
@@ -94,7 +95,7 @@ def review_task(db: Session, task: Task, user: User) -> Review:
         message_content = text_prompt
 
     result = call_with_tool(
-        system=SYSTEM_PROMPT,
+        system=SYSTEM_PROMPT + LANGUAGE_RULE,
         messages=[{"role": "user", "content": message_content}],
         tools=[SUBMIT_REVIEW_TOOL],
         force_tool="submit_review",

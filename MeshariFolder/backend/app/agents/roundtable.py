@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.agents import data_reviewer, manager, security_reviewer
 from app.agents.github_client import fetch_repo_context
+from app.agents.language import LANGUAGE_RULE
 from app.agents.llm_client import call_agentic
 from app.agents.meeting import PERSONA
 from app.models import (
@@ -153,7 +154,7 @@ def run_roundtable(db: Session, user: User, task: Task) -> list[TaskMessage]:
                 text = review.content
             else:
                 reply = call_agentic(
-                    system=PERSONA[agent_type] + _SPECIALIST_FRAMING,
+                    system=PERSONA[agent_type] + _SPECIALIST_FRAMING + LANGUAGE_RULE,
                     messages=[
                         {
                             "role": "user",
@@ -180,7 +181,7 @@ def run_roundtable(db: Session, user: User, task: Task) -> list[TaskMessage]:
         discussion = "\n\n".join(transcript)
         try:
             reply = call_agentic(
-                system=manager.SYSTEM_PROMPT + _MANAGER_SYNTHESIS_FRAMING,
+                system=manager.SYSTEM_PROMPT + _MANAGER_SYNTHESIS_FRAMING + LANGUAGE_RULE,
                 messages=[
                     {
                         "role": "user",

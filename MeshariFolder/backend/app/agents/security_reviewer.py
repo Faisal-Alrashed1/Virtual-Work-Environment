@@ -24,6 +24,7 @@ saw. Runs on the small tier, same as the other roundtable specialists.
 from sqlalchemy.orm import Session
 
 from app.agents.github_client import fetch_file_content, list_repo_paths, parse_owner_repo
+from app.agents.language import LANGUAGE_RULE
 from app.agents.llm_client import call_with_tool
 from app.agents.static_checks import (
     facts_for_prompt,
@@ -216,7 +217,7 @@ def review_task(
         summary = _not_reviewed_summary(task, unreadable)
     else:
         result = call_with_tool(
-            system=SYSTEM_PROMPT,
+            system=SYSTEM_PROMPT + LANGUAGE_RULE,
             messages=[
                 {
                     "role": "user",

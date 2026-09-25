@@ -50,6 +50,7 @@ def meeting_system_prompt(agent="mentor", text="what did you think of my solutio
 
 system = meeting_system_prompt()
 check("nothing submitted yet: no submission section", "most recent submission" not in system)
+check("the language rule is in every meeting prompt", "Saudi Najdi dialect" in system)
 
 db = SessionLocal()
 user = db.query(User).filter(User.email == email).first()
