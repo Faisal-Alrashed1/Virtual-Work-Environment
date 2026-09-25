@@ -296,6 +296,37 @@ enough), then add `GITHUB_TOKEN=...` to your own `backend/.env` (never to
 
 ---
 
+## 9. A "needs changes" review no longer looks like no review at all
+
+**Owner of the code:** Frontend (`components/workspace/task-workspace.tsx`,
+`app/workspace/page.tsx`, `lib/i18n/en.ts` + `ar.ts`).
+
+**What was wrong:** reported by Fahad — "I submitted but the review never
+came." The review had come (server log: Mentor, both specialists and the
+Manager answered within ~20 seconds), but:
+1. On `needs_changes` the task goes back to `in_progress`, and the page just
+   showed the empty submit form again. The "Reviewed by the mentor" notice
+   and the review link only existed for approved tasks.
+2. The agents discussion panel is `hidden` below the `xl` breakpoint
+   (1280px), so on a laptop or a non-maximized window the agents' replies
+   weren't visible anywhere.
+
+**What changed:**
+- On an `in_progress` task where the Mentor has already posted, a notice
+  above the form: "The mentor asked for changes", the Mentor's message,
+  a "See the full review" link, and "Update your work and submit it again
+  below." (English + Arabic).
+- Under `xl`, the same `AgentsMeeting` discussion (with the message box)
+  renders under the task, via a new `discussion` prop on `TaskWorkspace`.
+  At `xl` and wider it's hidden there and the side panel is used as before.
+
+**How it was checked** (browser, on the account that reported it): at
+1100px the notice shows with the Mentor's feedback and the full discussion
+(Manager, Mentor, Data/Security Reviewers, Manager) is under the task; at
+1440px it's in the side panel and not duplicated. Lint and tsc are clean.
+
+---
+
 ## Config note (not a code change)
 
 `qwen/qwen3.7-flash` via OpenRouter **does not reliably follow a forced tool

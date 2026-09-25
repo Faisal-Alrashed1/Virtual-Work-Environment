@@ -359,6 +359,8 @@ const en = {
     waitingOnMentor: "Waiting on the mentor's review.",
     reviewedByMentor: "Reviewed by the mentor.",
     seeFullReview: "See the full review",
+    changesRequested: "The mentor asked for changes.",
+    resubmitHint: "Update your work and submit it again below.",
     yourSubmission: "your submission",
   },
   agentsMeeting: {

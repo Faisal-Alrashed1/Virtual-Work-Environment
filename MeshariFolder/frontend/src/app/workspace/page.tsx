@@ -238,6 +238,16 @@ export default function WorkspacePage() {
                   task={selected}
                   busy={taskBusy}
                   onAdvance={handleAdvance}
+                  discussion={
+                    // The side panel below is hidden under the xl breakpoint;
+                    // there the discussion shows under the task instead.
+                    <AgentsMeeting
+                      task={selected}
+                      busy={taskBusy}
+                      extraAgents={extraAgents}
+                      onSendMessage={handleSendMessage}
+                    />
+                  }
                 />
               </div>
               <div className="hidden min-h-0 xl:block">
