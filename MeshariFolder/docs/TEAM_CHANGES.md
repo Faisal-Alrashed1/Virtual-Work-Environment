@@ -1,13 +1,82 @@
 # Team changes log
 
-Changes made to shared code or to code another teammate owns, so nobody is
-surprised by them. Each entry: what was wrong, how it was found, what
-changed, which files, and how to check it. Newest at the bottom.
+Changes made on branch **`Fahad_Last_update`** (Fahad — Security Reviewer /
+Data Reviewer), including fixes to shared code and code other teammates own.
+Start with the summary below; the numbered entries after it have the full
+detail for each change (what was wrong, how it was found, what changed,
+which files, how to check it).
 
-All of these came out of a **live test** with a real LLM key (Qwen via
-OpenRouter): a submission with an `app.py` containing two hardcoded secrets
-and an SQL injection, plus a notebook that scales data before the
-train/test split and scores only on training data.
+## Summary for the team
+
+### How the problems were found
+
+The app was run end to end with a real LLM key (Qwen via OpenRouter), and
+Fahad tested it by hand. The main test: submit an `app.py` with **two
+hardcoded passwords and an SQL injection**, plus a notebook that **scales
+the data before the train/test split and scores only on training data**.
+
+Result before any fix: **no agent caught any of the 5 problems.** None of
+the agents could read uploaded files — they only saw file names, and some
+made up a review anyway.
+
+### Before → after
+
+| Area | Before | After | Entry |
+|---|---|---|---|
+| Security / Data Reviewer | Free-text persona; saw only file names; said "no vulnerabilities" about code with 3 | Read the real files, rule-based checks + LLM, structured findings stored as a Review; catches all 5 problems | #0 |
+| Mentor | Saw only file names ("judge by name"); reviewed code it never saw | Reads uploaded code/notebooks/PDF/Word/zip | #1, #7 |
+| Mentor with an unreadable file | Invented a review of a CV PDF and **approved it 5/5** | Can't approve what it can't see: `needs_changes`, no fake scores | #6 |
+| Manager thread replies | Didn't know what was submitted | Sees the submission | #3 |
+| Meeting room | Agents couldn't see the submitted solution | See the latest submission + the Mentor's review | #10, #14 |
+| Model answers without its tool | Raw 500; browser showed "Can't reach the server" | Retry, fail over, then a readable 503 | #2 |
+| Workspace thread | Empty until you clicked the task; wiped by "Start" / language switch | Always loaded, never wiped | #4 |
+| "Needs changes" review | Page showed a blank form — looked like no review came | Notice with the Mentor's feedback + link; discussion visible on small screens | #9 |
+| Times | 3 hours off ("3h ago" for something just made) | Correct | #5 |
+| Arabic | Formal MSA, times and agent names stayed English, choice lost on reload | Saudi (Najdi) UI and agent replies, fully Arabic, choice remembered | #11–#15 |
+| GitHub limit | 60 requests/hour, ran out during testing | Optional `GITHUB_TOKEN` (5,000/hour) | #8 |
+| `qwen3.7-flash` | Broke CV upload and structured reviews | Replaced in config (see Config note) | Config note |
+
+### What you need to do
+
+- **Nothing to install.** No new dependencies.
+- **If you use Qwen via OpenRouter:** set
+  `QWEN_SMALL_MODEL=qwen/qwen3-30b-a3b-instruct-2507` in your `backend/.env`.
+- **Optional:** `GITHUB_TOKEN=...` in your `backend/.env` (see #8).
+- **If `/growth` shows "Module not found: victory-vendor"**: see the Config
+  note at the bottom.
+- **Run the tests:** every `smoke_test_*.py` in `backend/` passes (22
+  files, 7 of them new), and `npm run lint` + `npx tsc --noEmit` are clean.
+
+### Heads-up: merging with Loai's `loai-coach-agent`
+
+Both branches change `send_message` in `backend/app/agents/meeting.py`, so
+merging them conflicts there (it merges into `main` cleanly on its own).
+To resolve: keep Loai's Career Coach branch (`coach.generate_reply` /
+`generate_career_plan`), and in the `else` branch use this branch's line:
+
+```python
+system = PERSONA[agent] + _MEETING_FRAMING + LANGUAGE_RULE + "\n\n" + shared_context
+```
+
+(with `shared_context = _shared_context(db, user)`, which now also includes
+the latest submission). Consider passing the same context and
+`LANGUAGE_RULE` into `coach.generate_reply` so the Career Coach answers in
+Najdi and sees submissions too.
+
+### Still open (not fixed here)
+
+- **Deadlines are end-of-day UTC** (02:59 Riyadh time), and weekends /
+  attendance use UTC dates. Needs a team decision — see "Known issues".
+- A Mentor review wrongly approved **before** fix #6 stays approved in the
+  database; the fix only prevents new ones.
+
+### ملخص بالعربي
+
+- **وش لقينا:** جربنا المنصة بمفتاح حقيقي، ورفعنا ملف فيه كلمتين سر مكتوبة داخل الكود وثغرة SQL injection، ومعه notebook فيه تسريب بيانات. طلع إن ولا وكيل كان يقرأ الملفات المرفوعة. كلهم يشوفون اسم الملف بس، وبعضهم يخترع مراجعة من عنده. ولا مشكلة من الخمس انلقطت.
+- **وش صار الحين:** كل الوكلاء يقرون الملفات فعلاً، سواء كانت كود أو notebook أو PDF أو Word أو zip. وSecurity وData Reviewer يلقطون المشاكل الخمس كلها. والمرشد ما عاد يعتمد شي ما شافه. وغرفة الاجتماع تشوف آخر حل أرسله الطالب.
+- **الموقع:** ما عاد يطيح بخطأ 500. والنقاش ما يختفي. والوقت صار صحيح. وإذا طلب المرشد تعديلات، يطلع تنبيه واضح بدل نموذج فاضي.
+- **العربي:** الواجهة وردود الوكلاء صارت بلهجة سعودية نجدية، والأوقات وأسماء الوكلاء صارت بالعربي، واختيار اللغة يبقى محفوظ بعد تحديث الصفحة.
+- **انتبهوا:** فرع لؤي `loai-coach-agent` يتعارض مع هالفرع في ملف `meeting.py`. طريقة الحل مكتوبة فوق.
 
 ---
 
