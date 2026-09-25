@@ -244,6 +244,32 @@ now correctly asks for the actual files).
 
 ---
 
+## 7. Agents can read PDF, Word, and zipped projects
+
+**Owner of the code:** shared `app/agents/submission_files.py` (used by the
+Mentor, the Security/Data Reviewers, and the Manager's thread replies).
+
+**What was wrong:** only plain-text files and notebooks could be read. A
+PDF report, a Word document, or — very common — a whole project uploaded
+as a `.zip` came through as "can't be opened", so the Python files inside a
+zip were never seen.
+
+**What changed:**
+- PDF and `.docx` text is extracted with the same code the CV upload
+  already uses (`graph/cv_parsing.extract_cv_text`: pypdf / python-docx).
+- `.zip`: the readable files inside are read and named like
+  `project.zip/src/app.py`, so the agents (and the static checks) treat
+  each one like an uploaded file. Skips binaries, `.git/`,
+  `__pycache__/`, `node_modules/`, `venv/`.
+- Zip limits, so one archive can't flood the prompt or the server: at
+  most 15 files, each at most 1 MB once decompressed (protects against zip
+  bombs), and at most 3 files' worth of text in total.
+- A corrupt PDF / zip is reported as unreadable, never a crash.
+
+**Check it:** `python smoke_test_submission_files.py`.
+
+---
+
 ## Config note (not a code change)
 
 `qwen/qwen3.7-flash` via OpenRouter **does not reliably follow a forced tool
