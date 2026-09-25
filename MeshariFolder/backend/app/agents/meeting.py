@@ -23,18 +23,26 @@ from sqlalchemy.orm import Session
 
 from app.agents import hr, manager, mentor
 from app.agents.llm_client import call_agentic
+from app.agents.submission_files import read_submitted_files
 from app.models import (
     AgentCatalog,
     AgentType,
     ChatMessage,
     Project,
     ProjectStatus,
+    Review,
+    ReviewKind,
     SenderType,
+    Task,
     User,
     UserAgent,
     Week,
     WeekStatus,
 )
+
+# Same smaller per-file slice as the Manager's thread replies: a meeting
+# answers questions about the work, and runs on every message.
+_FILE_CHARS_FOR_MEETING = 1500
 
 PERSONA: dict[AgentType, str] = {
     AgentType.MANAGER: manager.SYSTEM_PROMPT,
@@ -115,7 +123,52 @@ def _shared_context(db: Session, user: User) -> str:
                 f"Current week {week.week_number}: {week.big_task_title} — "
                 f"{week.big_task_description}"
             )
+    submission = _latest_submission_context(db, user)
+    if submission:
+        parts.append(submission)
     return "\n".join(parts) if parts else "No CV, project, or history yet."
+
+
+def _latest_submission_context(db: Session, user: User) -> str | None:
+    """What the graduate most recently submitted, and the Mentor's latest
+    review of it — so "what did you think of my solution?" in a meeting
+    gets an answer about the actual work (docs/TEAM_CHANGES.md #10).
+    Before, meeting agents only knew the CV and the project."""
+    task = (
+        db.query(Task)
+        .filter(Task.user_id == user.id, Task.submitted_at.isnot(None))
+        .order_by(Task.submitted_at.desc())
+        .first()
+    )
+    if task is None:
+        return None
+    parts = [
+        f"Their most recent submission — task \"{task.title}\" "
+        f"(status: {task.status.value}):\n{task.description}"
+    ]
+    if task.github_link:
+        parts.append(f"GitHub link: {task.github_link}")
+    if task.submission_text:
+        parts.append(f"Their notes: {task.submission_text}")
+    readable, unreadable = read_submitted_files(task, max_chars_per_file=_FILE_CHARS_FOR_MEETING)
+    for filename, text in readable:
+        parts.append(f"--- {filename} ---\n{text}")
+    if unreadable:
+        parts.append("Also attached, but not readable here: " + ", ".join(unreadable))
+    review = (
+        db.query(Review)
+        .filter(
+            Review.task_id == task.id,
+            Review.agent_type == AgentType.MENTOR,
+            Review.kind == ReviewKind.TASK_REVIEW,
+        )
+        .order_by(Review.created_at.desc())
+        .first()
+    )
+    if review:
+        verdict = (review.metrics_json or {}).get("verdict", "?")
+        parts.append(f"The Mentor's latest review of it ({verdict}): {review.content}")
+    return "\n".join(parts)
 
 
 def get_history(db: Session, user: User, agent: AgentType) -> list[ChatMessage]:
