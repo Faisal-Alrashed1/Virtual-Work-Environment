@@ -191,21 +191,50 @@ export function resolveAgentDisplay(
   id: string,
   agents: Record<AgentId, AgentMeta>,
   extraAgents: ExtraAgent[],
-  extraNames: Record<string, string> = {}
+  extraText: ExtraAgentText = NO_EXTRA_TEXT
 ): AgentDisplay {
   if (id in agents) {
     const m = agents[id as AgentId];
     return { name: m.name, role: m.role, colorVar: m.colorVar };
   }
   const extra = extraAgents.find((a) => a.id === id);
-  return { name: extraNames[id] ?? extra?.name ?? id, role: extra?.description ?? "", colorVar: null };
+  return {
+    name: extraText.names[id] ?? extra?.name ?? id,
+    role: extraText.descriptions[id] ?? extra?.description ?? "",
+    colorVar: null,
+  };
 }
 
-/** The optional agents' names in the current locale, keyed by catalog id —
- * pass to resolveAgentDisplay. Unknown ids fall back to the catalog name. */
-export function useExtraAgentNames(): Record<string, string> {
+/** Optional agents' names and short descriptions in the current locale,
+ * keyed by catalog id. The backend catalog only has English, so without
+ * this they stayed English (and long) in the Arabic UI. Unknown ids fall
+ * back to the catalog's own text. */
+export interface ExtraAgentText {
+  names: Record<string, string>;
+  descriptions: Record<string, string>;
+}
+
+const NO_EXTRA_TEXT: ExtraAgentText = { names: {}, descriptions: {} };
+
+export function useExtraAgentText(): ExtraAgentText {
   const { tRaw } = useLocale();
-  return tRaw<Record<string, string>>("extraAgentNames");
+  return {
+    names: tRaw<Record<string, string>>("extraAgentNames"),
+    descriptions: tRaw<Record<string, string>>("extraAgentDescriptions"),
+  };
+}
+
+/** Plain function (safe in a .map): the agent with its name/description
+ * swapped for the current locale's, when there is one. */
+export function localizeExtraAgent<T extends { id: string; name: string; description: string }>(
+  agent: T,
+  text: ExtraAgentText
+): T {
+  return {
+    ...agent,
+    name: text.names[agent.id] ?? agent.name,
+    description: text.descriptions[agent.id] ?? agent.description,
+  };
 }
 
 /** timeAgo / timeUntil in the current locale ("3h ago" / "قبل 3 ساعة").

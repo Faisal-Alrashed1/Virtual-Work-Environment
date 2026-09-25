@@ -434,6 +434,34 @@ no '-ش' negations. Still some MSA mixed in — the model's limit with Najdi.
 
 ---
 
+## 15. Optional agents' names and descriptions follow the UI language
+
+**Owner of the code:** Frontend (`lib/i18n/*`, board/dashboard components,
+`orientation`, `onboarding/cv`).
+
+**What was wrong:** reported by Fahad — in Arabic mode the optional agents'
+descriptions stayed English (and long), because they come straight from the
+backend catalog, which only has English. #12 only covered their names in
+conversations. Also out of date: orientation showed a "soon" badge and said
+the extras "join the workflow as we build them in", and the board's detail
+panel said they're "not wired into the task flow yet" — no longer true for
+Security/Data Reviewer.
+
+**What changed:**
+- New `extraAgentDescriptions` (short, both languages) next to
+  `extraAgentNames`; `useExtraAgentText()` + `localizeExtraAgent()` in
+  `locale.tsx` (replacing `useExtraAgentNames`), applied everywhere they're
+  shown: onboarding's team step, orientation, agent cards, the board graph,
+  the detail panel, and conversations (`resolveAgentDisplay`). Unknown ids
+  still fall back to the catalog's text.
+- "soon" badge removed; `extrasNote` and `customAgentStatus` rewritten to
+  what's true now.
+
+**How it was checked** (browser, Arabic): board and orientation show
+"مراجع الأمان / يفحص كودك من ناحية الأمان والثغرات", no English left.
+
+---
+
 ## Config note (not a code change)
 
 `qwen/qwen3.7-flash` via OpenRouter **does not reliably follow a forced tool

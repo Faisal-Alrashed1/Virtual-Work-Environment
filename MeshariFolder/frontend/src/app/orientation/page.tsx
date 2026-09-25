@@ -9,7 +9,7 @@ import { AGENT_ORDER } from "@/lib/agents";
 import { fetchMyExtraAgents, type ExtraAgent } from "@/lib/team";
 import { fetchMyProject, type Project } from "@/lib/projects";
 import { assignNextTask } from "@/lib/tasks";
-import { useAgents, useLocale } from "@/lib/i18n/locale";
+import { localizeExtraAgent, useAgents, useExtraAgentText, useLocale } from "@/lib/i18n/locale";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleToggle } from "@/components/locale-toggle";
 
@@ -223,6 +223,7 @@ function WelcomeStep({ firstName }: { firstName: string }) {
 function TeamStep({ extraAgents }: { extraAgents: ExtraAgent[] }) {
   const { t } = useLocale();
   const agents = useAgents();
+  const extraText = useExtraAgentText();
   return (
     <section>
       <p className="font-mono text-[11px] text-text-muted">{t("orientation.yourTeamEyebrow")}</p>
@@ -242,16 +243,11 @@ function TeamStep({ extraAgents }: { extraAgents: ExtraAgent[] }) {
             </div>
           );
         })}
-        {extraAgents.map((agent) => (
+        {extraAgents.map((a) => localizeExtraAgent(a, extraText)).map((agent) => (
           <div key={agent.id} className="rounded border border-dashed border-border p-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-text-muted" />
-                <span className="font-medium text-text-primary">{agent.name}</span>
-              </div>
-              <span className="rounded-full border border-border px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
-                {t("orientation.soonBadge")}
-              </span>
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-text-muted" />
+              <span className="font-medium text-text-primary">{agent.name}</span>
             </div>
             <p className="mt-1.5 text-xs text-text-secondary">{agent.description}</p>
           </div>

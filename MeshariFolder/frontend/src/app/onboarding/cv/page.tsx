@@ -8,7 +8,7 @@ import { ApiError, useRequireAuth } from "@/lib/auth-context";
 import { api, type AgentCatalogApiOut, type ApiTrack } from "@/lib/api";
 import { SELECTABLE_ONLY_TRACKS } from "@/lib/tracks";
 import { createOwnProject } from "@/lib/projects";
-import { useLocale, useTrackLabels } from "@/lib/i18n/locale";
+import { localizeExtraAgent, useExtraAgentText, useLocale, useTrackLabels } from "@/lib/i18n/locale";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleToggle } from "@/components/locale-toggle";
 
@@ -30,6 +30,7 @@ export default function OnboardingPage() {
   const { user, loading: authLoading, refreshUser } = useRequireAuth();
   const router = useRouter();
   const { t } = useLocale();
+  const extraText = useExtraAgentText();
   const trackLabels = useTrackLabels();
 
   const [step, setStep] = useState<Step>("loading");
@@ -371,7 +372,7 @@ export default function OnboardingPage() {
             </p>
 
             <div className="mt-5 space-y-2">
-              {catalog.map((agent) => (
+              {catalog.map((a) => localizeExtraAgent(a, extraText)).map((agent) => (
                 <label
                   key={agent.id}
                   className="flex cursor-pointer items-start gap-3 rounded border border-border bg-bg-surface-raised p-3 transition-colors hover:border-border-strong"
