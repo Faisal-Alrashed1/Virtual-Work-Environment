@@ -327,6 +327,86 @@ Manager answered within ~20 seconds), but:
 
 ---
 
+## 10. The Meeting Room sees the graduate's latest submission
+
+**Owner of the code:** Meeting Room (`app/agents/meeting.py`).
+
+**What was wrong:** reported by Fahad — asking an agent in the meeting room
+about "the solution I sent" got a guess. Meeting agents only had the CV,
+the HR summary and the current project/week; nothing about submissions.
+
+**What changed:** new `_latest_submission_context()`, added to every
+meeting agent's context: the most recently submitted task (title, status,
+description), its GitHub link and notes, the uploaded files' content (1,500
+chars each, same as the Manager's thread replies — this runs on every
+message), and the Mentor's latest review of it.
+
+**Result in the live test:** asked "وش رأيك في آخر حل أرسلته لك؟", the Mentor
+named the submitted file and the task it was for, and what was missing.
+
+**Check it:** `python smoke_test_meeting_sees_submission.py`.
+
+---
+
+## 11. Agents answer in Saudi (Najdi) Arabic when the graduate writes in Arabic
+
+**Owner of the code:** new `app/agents/language.py`, used by `meeting.py`,
+`manager.py` (thread replies), `mentor.py`, `security_reviewer.py`,
+`data_reviewer.py`, `roundtable.py`.
+
+**What changed:** one shared `LANGUAGE_RULE` appended to the system prompt
+of every agent that writes text a graduate reads: answer in the graduate's
+language; if they write in Arabic (messages or submission notes), use Saudi
+Najdi dialect rather than formal MSA; keep code, file names and technical
+terms as-is. **English is unchanged** — no Arabic input, English output.
+
+---
+
+## 12. Arabic UI rewritten in Saudi (Najdi) dialect, and fully Arabic
+
+**Owner of the code:** Frontend (`lib/i18n/ar.ts`, `en.ts`, `locale.tsx`,
+`lib/format.ts`, and the components that show times or agent names).
+
+**What was wrong:** the Arabic UI was formal MSA, and parts stayed English in
+Arabic mode — every relative time ("3h ago", "due in 2d") and the optional
+agents' names ("Data reviewer"), which come from the backend catalog.
+
+**What changed:**
+- `ar.ts` rewritten in Najdi dialect, as plain UTF-8 Arabic instead of
+  `\u` escapes so it can be read and edited directly. Same keys — TypeScript
+  still fails the build if it drifts from `en.ts`.
+- Relative times are translated: new `time` keys in both dictionaries,
+  `timeAgo`/`timeUntil` take the labels, and components get them through the
+  new `useRelativeTime()` hook ("قبل 3 ساعة", "الموعد بعد 2 يوم").
+- Optional agents' names are translated in conversations: new
+  `extraAgentNames` keys + `useExtraAgentNames()`, passed to
+  `resolveAgentDisplay`.
+
+**How it was checked** (browser): in Arabic, the workspace shows Arabic times
+and agent names with no English left; in English nothing changed.
+
+---
+
+## 13. Language and theme choices survive a page reload
+
+**Owner of the code:** Frontend (`lib/i18n/locale.tsx`, `lib/theme.tsx`).
+
+**What was wrong:** choosing Arabic (or light mode) was lost on every
+reload, and the stored choice was overwritten with the default. The
+providers saved the state to `localStorage` from an effect, which also ran
+on the first mount with the default value ("en" / "dark"); under dev
+`StrictMode` the adoption step then re-read `<html lang>` after that effect
+had reset it.
+
+**What changed:** the choice is saved only when the user toggles it, and on
+load it's read from `localStorage` (same rule as the anti-flash script in
+`app/layout.tsx`), not from the `<html>` attribute.
+
+**How it was checked** (browser): switched to Arabic + light, reloaded:
+still Arabic, right-to-left, light; no hydration warnings in the console.
+
+---
+
 ## Config note (not a code change)
 
 `qwen/qwen3.7-flash` via OpenRouter **does not reliably follow a forced tool
