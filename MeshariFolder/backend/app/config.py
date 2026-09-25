@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     qwen_model: str = "qwen-max"
     qwen_small_model: str = "qwen-turbo"
 
+    # Optional. Raises GitHub's API limit from 60 to 5,000 requests/hour
+    # and lets the agents read private repos the token can see — see
+    # app/agents/github_client.py.
+    github_token: str = ""
+
     upload_dir: str = "uploads"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

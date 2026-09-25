@@ -1,18 +1,28 @@
 """
-Minimal, unauthenticated GitHub REST client — just enough context for the
-Mentor agent to review real submitted work. Stage 1 only accepts public
-repo links (see Project-Summary.md's "Code submission: GitHub link (public
-repos)"), so no token is needed. The public API is rate-limited to 60
-unauthenticated requests/hour per IP, which is fine at bootcamp scale; if
-that ever becomes a problem, pass a token via a new GITHUB_TOKEN setting
-and add it as a Bearer header below — nothing else here would need to change.
+Minimal GitHub REST client — just enough context for the agents to review
+real submitted work. Works with no token for public repos, but the
+unauthenticated API allows only 60 requests/hour per IP, and one review
+with a GitHub link uses several (Mentor + Security/Data Reviewers) — a
+handful of submissions an hour used it up in testing. Set GITHUB_TOKEN in
+backend/.env (a personal access token; read-only public access is enough)
+to raise that to 5,000/hour, and to let the agents read private repos the
+token can see.
 """
 import base64
 import re
 
 import httpx
 
+from app.config import settings
+
 _LINK_RE = re.compile(r"github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$")
+
+
+def _client() -> httpx.Client:
+    headers = {"Accept": "application/vnd.github+json"}
+    if settings.github_token:
+        headers["Authorization"] = f"Bearer {settings.github_token}"
+    return httpx.Client(timeout=10.0, headers=headers)
 
 
 def parse_owner_repo(github_link: str) -> tuple[str, str]:
@@ -31,9 +41,7 @@ def fetch_repo_context(github_link: str, max_files: int = 25) -> str:
     owner, repo = parse_owner_repo(github_link)
     parts = [f"Repo: {owner}/{repo}"]
 
-    with httpx.Client(
-        timeout=10.0, headers={"Accept": "application/vnd.github+json"}
-    ) as client:
+    with _client() as client:
         meta = client.get(f"https://api.github.com/repos/{owner}/{repo}")
         if meta.status_code != 200:
             parts.append(
@@ -88,9 +96,7 @@ def list_repo_paths(owner: str, repo: str) -> list[str] | None:
     the repo/tree couldn't be fetched — a private repo, a typo, or
     GitHub's unauthenticated rate limit (60/hour) — so callers can tell
     "GitHub didn't answer" apart from "the repo has no such files"."""
-    with httpx.Client(
-        timeout=10.0, headers={"Accept": "application/vnd.github+json"}
-    ) as client:
+    with _client() as client:
         meta = client.get(f"https://api.github.com/repos/{owner}/{repo}")
         if meta.status_code != 200:
             return None
@@ -115,9 +121,7 @@ def fetch_file_content(owner: str, repo: str, path: str) -> str | None:
     (e.g. a binary file, or the request itself failing) — always
     best-effort, never raises, since a candidate filename not existing is
     the expected common case, not an error."""
-    with httpx.Client(
-        timeout=10.0, headers={"Accept": "application/vnd.github+json"}
-    ) as client:
+    with _client() as client:
         resp = client.get(f"https://api.github.com/repos/{owner}/{repo}/contents/{path}")
         if resp.status_code != 200:
             return None

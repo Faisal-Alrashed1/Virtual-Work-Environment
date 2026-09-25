@@ -429,4 +429,19 @@ check("env check: .env.local counts", has_env([".env.local"]))
 check("env check: .env.example does NOT count", not has_env([".env.example", ".env.sample"]))
 check("env check: environment.py does NOT count", not has_env(["src/environment.py", "docs/.envrc-notes.md"]))
 
+# --- 14. GITHUB_TOKEN: sent as a Bearer header only when it's set. ---
+from app.config import settings  # noqa: E402
+from app.agents import github_client  # noqa: E402
+
+original_token = settings.github_token
+try:
+    settings.github_token = ""
+    with github_client._client() as c:
+        check("github: no token -> no Authorization header", "authorization" not in c.headers)
+    settings.github_token = "ghp_exampletoken123"
+    with github_client._client() as c:
+        check("github: token set -> Bearer header", c.headers.get("authorization") == "Bearer ghp_exampletoken123")
+finally:
+    settings.github_token = original_token
+
 print("\nAll Stage 2 specialist reviewer (unit) smoke checks passed.")

@@ -270,6 +270,32 @@ zip were never seen.
 
 ---
 
+## 8. Optional `GITHUB_TOKEN` for GitHub's request limit
+
+**Owner of the code:** shared `app/agents/github_client.py` (Mentor and the
+Security/Data Reviewers) + `app/config.py`.
+
+**What was wrong:** GitHub allows 60 unauthenticated API requests per hour
+per IP, and one review with a GitHub link spends several. During testing
+it ran out twice ("API rate limit exceeded"), after which every agent saw
+"GitHub didn't respond" for every link until the hour reset.
+
+**What changed:**
+- New optional setting `GITHUB_TOKEN` (`config.py`, documented in
+  `.env.example`). When set, every GitHub request sends it as a Bearer
+  token: 5,000 requests/hour, and private repos the token can read.
+- The three places that opened their own `httpx.Client` now share one
+  `_client()` helper. Behavior without a token is unchanged.
+
+**To use it:** create a personal access token on GitHub (Settings →
+Developer settings → Personal access tokens; read-only public access is
+enough), then add `GITHUB_TOKEN=...` to your own `backend/.env` (never to
+`.env.example`) and restart the backend.
+
+**Check it:** `python smoke_test_stage2_specialist_reviewers.py` (#14).
+
+---
+
 ## Config note (not a code change)
 
 `qwen/qwen3.7-flash` via OpenRouter **does not reliably follow a forced tool
@@ -293,5 +319,3 @@ lockfile doesn't change.
   the UTC date is still the previous day). HR's attendance (`hr._active_days`)
   also counts UTC dates. Fixing it means computing these in `Asia/Riyadh`;
   it changes when work counts as late, so it needs a team decision first.
-- GitHub's unauthenticated limit is 60 requests/hour; a few submissions with
-  GitHub links use it up. Planned fix: an optional `GITHUB_TOKEN`.
