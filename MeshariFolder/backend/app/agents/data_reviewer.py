@@ -18,6 +18,8 @@ stored as verdict 'not_reviewed' with a message telling the graduate
 what to upload — same reasoning as security_reviewer.py. Runs on the
 small tier, same as the other roundtable specialists.
 """
+import re
+
 from sqlalchemy.orm import Session
 
 from app.agents.github_client import fetch_file_content, list_repo_paths, parse_owner_repo
@@ -63,7 +65,7 @@ SYSTEM_PROMPT = (
 
 _NOTEBOOK_EXTENSION = ".ipynb"
 _MAX_NOTEBOOKS = 3
-_EVAL_PATH_HINTS = ("eval", "test", "metric", "score")
+_EVAL_PATH_HINTS = ("eval", "test", "metric", "scor")
 
 
 def _find_notebook_paths(paths: list[str]) -> list[str]:
@@ -87,9 +89,15 @@ def _has_evaluation_file(paths: list[str]) -> bool:
     security_reviewer's _has_exposed_env_file: does any repo path suggest
     an evaluation/test/metrics script? A concrete, checkable signal for
     'is evaluation methodology even visible', not something worth leaving
-    to the LLM to notice or miss from a raw path listing."""
-    lowered = [p.lower() for p in paths]
-    return any(hint in p for p in lowered for hint in _EVAL_PATH_HINTS)
+    to the LLM to notice or miss from a raw path listing.
+
+    Matches whole words in the path (a word *starting* with a hint), not
+    any substring — otherwise 'latest.py' or 'contest/' counted as tests."""
+    for path in paths:
+        words = re.split(r"[^a-z0-9]+", path.lower())
+        if any(word.startswith(hint) for word in words for hint in _EVAL_PATH_HINTS):
+            return True
+    return False
 
 
 def _gather_content(task: Task) -> tuple[list[str], list[str], list[str], list[tuple[str, str]]]:

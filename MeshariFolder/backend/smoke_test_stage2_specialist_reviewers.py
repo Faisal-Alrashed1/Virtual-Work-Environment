@@ -414,4 +414,19 @@ check(
 )
 db.close()
 
+# --- 13. The quick path checks match real names, not substrings. ---
+has_eval = data_reviewer._has_evaluation_file
+check("eval check: tests/ counts", has_eval(["src/model.py", "tests/test_model.py"]))
+check("eval check: evaluate.py counts", has_eval(["evaluate.py"]))
+check("eval check: metrics_report.ipynb counts", has_eval(["notebooks/metrics_report.ipynb"]))
+check("eval check: latest.py does NOT count", not has_eval(["latest.py", "src/contest_data.csv"]))
+check("eval check: attestation.md does NOT count", not has_eval(["docs/attestation.md"]))
+
+has_env = security_reviewer._has_exposed_env_file
+check("env check: .env counts", has_env(["app.py", ".env"]))
+check("env check: .env.production counts", has_env(["config/.env.production"]))
+check("env check: .env.local counts", has_env([".env.local"]))
+check("env check: .env.example does NOT count", not has_env([".env.example", ".env.sample"]))
+check("env check: environment.py does NOT count", not has_env(["src/environment.py", "docs/.envrc-notes.md"]))
+
 print("\nAll Stage 2 specialist reviewer (unit) smoke checks passed.")

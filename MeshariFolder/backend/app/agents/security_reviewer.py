@@ -90,13 +90,21 @@ def _fetch_dependency_files(owner: str, repo: str, paths: list[str]) -> list[tup
     return files
 
 
+_ENV_TEMPLATE_SUFFIXES = (".example", ".sample", ".template", ".dist")
+
+
 def _has_exposed_env_file(paths: list[str]) -> bool:
     """Deterministic, code-level check (not left to the LLM to notice or
     miss) — mirrors hr.py's _active_days: compute the fact in code, let
     the LLM judge/narrate it. A real '.env' (not '.env.example'/
     '.env.sample') committed to a public repo is a concrete, checkable
-    red flag, not something that needs LLM judgment to detect."""
-    return any(p == ".env" or p.endswith("/.env") for p in paths)
+    red flag, not something that needs LLM judgment to detect. Variants
+    like '.env.production' / '.env.local' count too; templates don't."""
+    for path in paths:
+        name = path.rsplit("/", 1)[-1].lower()
+        if (name == ".env" or name.startswith(".env.")) and not name.endswith(_ENV_TEMPLATE_SUFFIXES):
+            return True
+    return False
 
 
 def _gather_content(task: Task) -> tuple[list[str], list[str], list[str], list[tuple[str, str]]]:
