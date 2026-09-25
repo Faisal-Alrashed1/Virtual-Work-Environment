@@ -49,7 +49,8 @@ def meeting_system_prompt(agent="mentor", text="what did you think of my solutio
 
 
 system = meeting_system_prompt()
-check("nothing submitted yet: no submission section", "most recent submission" not in system)
+check("nothing submitted yet: the agent is told so explicitly", "nothing has been submitted yet" in system)
+check("the agent is told it can see submissions", "have access to what the graduate submitted" in system)
 check("the language rule is in every meeting prompt", "Saudi Najdi dialect" in system)
 
 db = SessionLocal()

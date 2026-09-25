@@ -407,6 +407,33 @@ still Arabic, right-to-left, light; no hydration warnings in the console.
 
 ---
 
+## 14. Follow-up to #10/#11: agents actually use the submission, in Najdi
+
+**What was wrong after #10/#11:** Fahad re-tested — meeting agents still
+said "I can't access the solution you sent", with Egyptian-sounding words
+('ما عنديش', 'مش'). Replaying his exact question on his real context showed
+the submission *was* in the prompt; the model just fell back to a stock
+"I can't see your files" answer (helped along by his earlier replies saying
+the same), and the Mentor said it had seen only part of the file (1,500
+chars).
+
+**What changed:**
+- `meeting.py`: the meeting framing now states that the agent has the
+  graduate's latest submission below and must answer from it (and correct
+  an earlier reply that said otherwise); with no submission, the context
+  says so explicitly. Per-file slice raised to 4,000 chars (same as the
+  Mentor's review).
+- `language.py`: explicit Najdi word list (وش / أبي / مو / ما عندي /
+  الحين ...) with the Egyptian/Levantine/Hijazi forms to avoid, no '-ش'
+  negation, no formal connectors, an example of the tone, and "don't copy
+  the dialect of earlier replies".
+
+**Result** (his real context and history, 6 replays, nothing written to his
+account): 6/6 named his file and discussed its content, 0/6 denied access,
+no '-ش' negations. Still some MSA mixed in — the model's limit with Najdi.
+
+---
+
 ## Config note (not a code change)
 
 `qwen/qwen3.7-flash` via OpenRouter **does not reliably follow a forced tool

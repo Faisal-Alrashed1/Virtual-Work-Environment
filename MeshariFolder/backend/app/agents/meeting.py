@@ -41,9 +41,9 @@ from app.models import (
     WeekStatus,
 )
 
-# Same smaller per-file slice as the Manager's thread replies: a meeting
-# answers questions about the work, and runs on every message.
-_FILE_CHARS_FOR_MEETING = 1500
+# Same per-file slice as the Mentor's review. A smaller one (1,500) left
+# the model saying it had only seen part of a typical solution file.
+_FILE_CHARS_FOR_MEETING = 4000
 
 PERSONA: dict[AgentType, str] = {
     AgentType.MANAGER: manager.SYSTEM_PROMPT,
@@ -95,6 +95,18 @@ _MEETING_FRAMING = (
     "conversation, not tied to any specific task. Answer their questions "
     "directly and helpfully in your own voice, staying in character. Keep "
     "replies concise and conversational (a few sentences), not essays."
+    # Without this, the model answered "I can't see files you sent" even
+    # though the submission's content was in its context (live-tested).
+    "\n\nYou work inside the Venv platform and have access to what the "
+    "graduate submitted: below, under 'most recent submission', is the "
+    "actual content of the last work they sent (their files, notes, and "
+    "the Mentor's review of it). When they ask about their solution, their "
+    "work, or what they sent, answer from that content — name the file and "
+    "talk about what's in it. Never say you can't see their files or ask "
+    "them to paste it again when it's there. If an earlier reply in this "
+    "conversation said you couldn't see it, that was wrong: correct it "
+    "plainly. If the section says nothing has been submitted, tell them "
+    "that instead."
 )
 
 
@@ -124,9 +136,10 @@ def _shared_context(db: Session, user: User) -> str:
                 f"Current week {week.week_number}: {week.big_task_title} — "
                 f"{week.big_task_description}"
             )
-    submission = _latest_submission_context(db, user)
-    if submission:
-        parts.append(submission)
+    parts.append(
+        _latest_submission_context(db, user)
+        or "Their most recent submission: nothing has been submitted yet."
+    )
     return "\n".join(parts) if parts else "No CV, project, or history yet."
 
 
