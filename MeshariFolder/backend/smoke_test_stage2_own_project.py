@@ -48,7 +48,7 @@ headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
 r = client.post(
     "/projects/own",
     headers=headers,
-    json={
+    data={
         "title": "Personal expense tracker",
         "description": "A Next.js + Supabase app for tracking personal spending by category.",
     },
@@ -57,12 +57,13 @@ check("create own project -> 201", r.status_code == 201)
 check("source is 'own'", r.json()["source"] == "own")
 own_project_id = r.json()["id"]
 
-r = client.post("/projects/own", headers=headers, json={"title": "Second one", "description": "d"})
+r = client.post("/projects/own", headers=headers, data={"title": "Second one", "description": "d"})
 check("second own project rejected while one is active", r.status_code == 400)
 
 r = client.get("/projects/me", headers=headers)
 check("GET /projects/me returns the own project, no weeks yet", r.status_code == 200 and r.json()["weeks"] == [])
 check("GET /projects/me title matches what was submitted", r.json()["title"] == "Personal expense tracker")
+check("no materials were given, so has_materials is false", r.json()["has_materials"] is False)
 
 # --- mocked LLM: only plan_week + release should ever be called; NOT
 # create_project, since a Project already exists ---

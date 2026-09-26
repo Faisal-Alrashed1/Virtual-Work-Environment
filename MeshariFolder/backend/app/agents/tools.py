@@ -85,8 +85,9 @@ SUBMIT_REVIEW_TOOL = {
                 "type": "string",
                 "enum": ["approved", "needs_changes"],
                 "description": (
-                    "'needs_changes' only when something genuinely blocks "
-                    "the task's goal — minor gaps can still be 'approved'."
+                    "'needs_changes' only when 'Meets requirements' scores below 3 "
+                    "(the task's goal isn't met). Weak tests/docs/code quality alone "
+                    "never block: approve and note them. Must agree with the scores."
                 ),
             },
             "summary": {
@@ -116,7 +117,9 @@ SUBMIT_REVIEW_TOOL = {
                     },
                     "required": ["key", "label", "score"],
                 },
-                "description": "Score all four categories: correctness, code_quality, testing, documentation.",
+                "minItems": 4,
+                "maxItems": 4,
+                "description": "Score all four categories exactly once: correctness, code_quality, testing, documentation.",
             },
             "comments": {
                 "type": "array",
@@ -131,7 +134,11 @@ SUBMIT_REVIEW_TOOL = {
                     },
                     "required": ["category", "content"],
                 },
-                "description": "Specific inline comments, referencing what's actually in the repo.",
+                "maxItems": 4,
+                "description": (
+                    "Specific comments, each pointing at something concrete in the "
+                    "submission. At most 3 when needs_changes, at most 2 when approved."
+                ),
             },
         },
         "required": ["verdict", "summary", "categories", "comments"],
@@ -225,109 +232,39 @@ BEHAVIORAL_REVIEW_TOOL = {
     },
 }
 
-# Shared shape for the two specialist reviewers below (security_reviewer.py,
-# data_reviewer.py) — a structured finding, not a free-text comment, so
-# their output can be stored/compared/tracked the same way the Mentor's
-# rubric already is (see Review.kind == SPECIALIST_REVIEW in models.py).
-_FINDING_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "category": {"type": "string"},
-        "severity": {"type": "string", "enum": ["low", "medium", "high"]},
-        "description": {"type": "string", "description": "What was actually found, specific to this submission."},
-        "recommendation": {"type": "string", "description": "The concrete fix or next step."},
-    },
-    "required": ["category", "severity", "description", "recommendation"],
-}
-
-SUBMIT_SECURITY_REVIEW_TOOL = {
-    "name": "submit_security_review",
+CAREER_CHECKIN_TOOL = {
+    "name": "submit_career_checkin",
     "description": (
-        "Submit a structured security review of a submitted task — real "
-        "vulnerabilities and secure-coding concerns grounded in the actual "
-        "repo content provided (dependency files, config, code), not "
-        "generic security advice. Empty findings if nothing's concerning."
+        "Write this graduate's career check-in — how their work so far "
+        "would read to an employer, and what to focus on next to "
+        "strengthen that — based on their Employee File and CV."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "verdict": {"type": "string", "enum": ["clear", "concerns_found"]},
-            "risk_level": {
-                "type": "string",
-                "enum": ["low", "medium", "high"],
-                "description": "Overall risk level across every finding — 'low' if findings is empty.",
-            },
-            "findings": {
-                "type": "array",
-                "items": {
-                    **_FINDING_SCHEMA,
-                    "properties": {
-                        **_FINDING_SCHEMA["properties"],
-                        "category": {
-                            "type": "string",
-                            "enum": [
-                                "dependency_vulnerability",
-                                "hardcoded_secret",
-                                "injection_risk",
-                                "authentication_weakness",
-                                "insecure_configuration",
-                                "other",
-                            ],
-                        },
-                    },
-                },
-            },
             "summary": {
                 "type": "string",
-                "description": "2-4 sentences, posted in the task thread — specific to what was actually reviewed.",
+                "description": (
+                    "2-4 sentence honest assessment of how hireable their "
+                    "work-to-date makes them look, grounded in specifics "
+                    "from the Employee File — not generic encouragement."
+                ),
             },
-        },
-        "required": ["verdict", "risk_level", "findings", "summary"],
-    },
-}
-
-SUBMIT_DATA_REVIEW_TOOL = {
-    "name": "submit_data_review",
-    "description": (
-        "Submit a structured data-quality review of a submitted task — "
-        "concrete issues in the actual notebook/pipeline content provided "
-        "(data leakage, reproducibility, evaluation methodology), not "
-        "textbook generalities. Empty findings if nothing's concerning."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "verdict": {"type": "string", "enum": ["clear", "concerns_found"]},
-            "risk_level": {
-                "type": "string",
-                "enum": ["low", "medium", "high"],
-                "description": "Overall risk level across every finding — 'low' if findings is empty.",
-            },
-            "findings": {
+            "resume_highlights": {
                 "type": "array",
-                "items": {
-                    **_FINDING_SCHEMA,
-                    "properties": {
-                        **_FINDING_SCHEMA["properties"],
-                        "category": {
-                            "type": "string",
-                            "enum": [
-                                "data_leakage",
-                                "reproducibility",
-                                "evaluation_methodology",
-                                "data_quality",
-                                "documentation",
-                                "other",
-                            ],
-                        },
-                    },
-                },
+                "items": {"type": "string"},
+                "description": (
+                    "2-4 concrete bullets they could actually put on a "
+                    "resume or LinkedIn, phrased the way a real resume "
+                    "bullet reads (action verb + what + impact) — not "
+                    "restated task titles."
+                ),
             },
-            "summary": {
+            "suggested_focus": {
                 "type": "string",
-                "description": "2-4 sentences, posted in the task thread — specific to what was actually reviewed.",
+                "description": "The one thing most worth focusing on next to strengthen their story for employers.",
             },
         },
-        "required": ["verdict", "risk_level", "findings", "summary"],
+        "required": ["summary", "resume_highlights", "suggested_focus"],
     },
 }

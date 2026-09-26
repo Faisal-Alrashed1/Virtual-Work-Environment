@@ -7,6 +7,10 @@ venv/
 *.db
 .pytest_cache/
 backend/uploads/
+# e2e_real_llm.py --save-report output (e.g. run1.json) — its own --help
+# suggests that exact filename, which made it easy to accidentally `git add`
+# once alongside real changes. Local debugging output, not source.
+backend/run*.json
 
 # --- Node (frontend, once it exists) ---
 node_modules/

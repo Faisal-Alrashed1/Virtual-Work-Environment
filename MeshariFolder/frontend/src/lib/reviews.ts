@@ -1,5 +1,4 @@
-import { api, type MentorMetricsApi, type ReviewApiOut } from "./api";
-import type { AgentId } from "./agents";
+import { api, type ApiAgentType, type CareerCheckinMetricsApi, type MentorMetricsApi, type ReviewApiOut } from "./api";
 
 export type ReviewVerdict = "approved" | "needs_changes";
 
@@ -15,20 +14,26 @@ export interface ReviewComment {
   content: string;
 }
 
+/** The Career Coach's career check-in (docs/TEN_AGENTS.md) — the one
+ * agent besides Manager/Mentor/HR that now writes a Review, so
+ * Review.agentType below can no longer assume it's always one of the
+ * three defaults. */
+export interface CareerCheckin {
+  resumeHighlights: string[];
+  suggestedFocus: string;
+}
+
 export interface Review {
   id: string;
   taskId: string | null;
   weekId: string | null;
-  // Always one of the three default agents today — task_review,
-  // week_progress, behavioral, and skills_rollup reviews are all written
-  // by Manager/Mentor/HR; the optional agents from onboarding don't
-  // write reviews (yet). See toReview's cast below.
-  agentType: AgentId;
-  kind: "task_review" | "week_progress" | "behavioral" | "skills_rollup";
+  agentType: ApiAgentType;
+  kind: "task_review" | "week_progress" | "behavioral" | "skills_rollup" | "career_checkin";
   verdict: ReviewVerdict | null; // null for anything that isn't a Mentor task review
   content: string;
   categories: RubricCategory[];
   comments: ReviewComment[];
+  careerCheckin: CareerCheckin | null; // set only for kind === "career_checkin"
   createdAt: string;
 }
 
@@ -38,22 +43,32 @@ function isMentorMetrics(
   return !!metrics && "verdict" in metrics;
 }
 
+function isCareerCheckinMetrics(
+  metrics: ReviewApiOut["metrics_json"]
+): metrics is CareerCheckinMetricsApi {
+  return !!metrics && "resume_highlights" in metrics;
+}
+
 function toReview(r: ReviewApiOut): Review {
-  const metrics = isMentorMetrics(r.metrics_json) ? r.metrics_json : null;
+  const mentorMetrics = isMentorMetrics(r.metrics_json) ? r.metrics_json : null;
+  const careerMetrics = isCareerCheckinMetrics(r.metrics_json) ? r.metrics_json : null;
   return {
     id: r.id,
     taskId: r.task_id,
     weekId: r.week_id,
-    agentType: r.agent_type as AgentId,
+    agentType: r.agent_type,
     kind: r.kind,
-    verdict: metrics?.verdict ?? null,
+    verdict: mentorMetrics?.verdict ?? null,
     content: r.content,
-    categories: metrics?.categories ?? [],
-    comments: (metrics?.comments ?? []).map((c, i) => ({
+    categories: mentorMetrics?.categories ?? [],
+    comments: (mentorMetrics?.comments ?? []).map((c, i) => ({
       id: `${r.id}-c${i}`,
       category: c.category,
       content: c.content,
     })),
+    careerCheckin: careerMetrics
+      ? { resumeHighlights: careerMetrics.resume_highlights, suggestedFocus: careerMetrics.suggested_focus }
+      : null,
     createdAt: r.created_at,
   };
 }

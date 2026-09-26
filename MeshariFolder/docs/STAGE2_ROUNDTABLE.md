@@ -108,3 +108,11 @@ it's the clean fix for the stuck pre-Stage-2 users too.
 - **Onboarding mid-flow resume** (closing the tab mid-wizard) is still
   not supported — reset is all-or-nothing back to the CV step. Documented
   in `STAGE2_ONBOARDING_FRONTEND.md`.
+
+---
+
+**Update:** the discussion described here now runs in the background after the Mentor's
+review is returned, so the graduate waits for the Mentor only (about 10s instead of about
+25s) while the comments appear in the thread as they are written. Nothing about who speaks,
+in what order, or with which model changed. See `docs/BACKGROUND_ROUNDTABLE.md`.
+

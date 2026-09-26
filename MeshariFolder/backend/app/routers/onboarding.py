@@ -9,20 +9,22 @@ resume" and replays the same interrupt instead of advancing. Every resume
 below sends a dict with at least one key for that reason, even when the
 value itself is None.
 
-The compiled graph is a module-level singleton — see
-build_onboarding_graph's docstring: its checkpointer is in-memory and
-process-local, fine for dev, but a restart loses every graduate's
-in-progress onboarding, and re-uploading a CV mid-flow isn't handled yet
-(it restarts the graph on the same thread rather than resetting it
-cleanly). Both are open items, not bugs introduced here.
+The compiled graph is a module-level singleton whose checkpointer is
+in-memory and per-process — so it is NOT trusted as the record of where a
+graduate is. Every pause's output is saved on the User row, and each step
+below first makes sure the graph thread is paused at the right place,
+rebuilding it from the database if it isn't (a restart, another worker, a
+stale thread). That is what makes onboarding resumable — see
+docs/ONBOARDING_RESUME.md and app/agents/graph/onboarding_resume.py.
 """
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from langgraph.types import Command
 from sqlalchemy.orm import Session
 
 from app.agents.graph.catalog import catalog_as_dicts
-from app.agents.graph.cv_parsing import extract_cv_text
+from app.agents.graph.cv_parsing import CVReadError, read_cv_upload, validate_is_cv
 from app.agents.graph.onboarding_graph import build_onboarding_graph
+from app.agents.graph.onboarding_resume import NotResumable, can_resume, drop_thread, ensure_paused_at
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import AgentCatalog, OnboardingStage, TrackEnum, User, UserAgent
@@ -33,6 +35,7 @@ from app.schemas import (
     OnboardingCompleteOut,
     OnboardingQASubmit,
     OnboardingQuestionsOut,
+    OnboardingResumeOut,
     OnboardingStateOut,
     OnboardingTrackApprove,
     OnboardingTrackOut,
@@ -52,6 +55,30 @@ def _interrupt_payload(result: dict) -> dict:
     if not interrupts:
         raise HTTPException(500, "Onboarding graph didn't pause where expected.")
     return interrupts[0].value
+
+
+def _require_stage(user: User, *allowed: OnboardingStage) -> None:
+    """Steps must happen in order. Without this a double-clicked "continue"
+    would resume the graph at the *next* pause with the previous step's
+    payload — e.g. a second Q&A submit silently approving the suggested track."""
+    if user.onboarding_stage not in allowed:
+        raise HTTPException(
+            409,
+            f"Onboarding isn't at that step (you're at '{user.onboarding_stage.value}'). "
+            "Reload the page to continue where you left off.",
+        )
+
+
+def _prepare_thread(user: User, db: Session, stage: OnboardingStage) -> None:
+    """Make sure the graph is paused at `stage`'s human step — rebuilt from
+    the database if the in-memory thread is missing or stale."""
+    try:
+        ensure_paused_at(_graph, user, catalog_as_dicts(db), stage)
+    except NotResumable:
+        raise HTTPException(
+            409,
+            "We couldn't restore your earlier progress — please upload your CV again to restart onboarding.",
+        )
 
 
 @router.get("/catalog", response_model=list[AgentCatalogOut])
@@ -74,11 +101,20 @@ def upload_cv(
     has_cv semantics Stage 1 already exposes via UserOut), and runs the
     graph up to the first interrupt — the Q&A questions."""
     content = file.file.read()
-    cv_text = extract_cv_text(file.filename or "cv.txt", content)
-    if not cv_text.strip():
-        raise HTTPException(400, "Couldn't extract any text from that file.")
+    try:
+        cv_text = read_cv_upload(file.filename, content)
+        validate_is_cv(cv_text)
+    except CVReadError as exc:
+        raise HTTPException(exc.status_code, str(exc))
 
+    # A fresh upload always starts a clean run: forget any stale graph thread
+    # and any half-finished wizard output from a previous attempt.
+    drop_thread(_graph, current_user)
     current_user.cv_raw_text = cv_text
+    current_user.intro_text = None
+    current_user.suggested_track = None
+    current_user.suggested_track_reasoning = None
+    current_user.suggested_agent_ids_json = None
     db.commit()
 
     initial_state = {
@@ -89,6 +125,9 @@ def upload_cv(
     result = _graph.invoke(initial_state, config=_config(current_user))
     payload = _interrupt_payload(result)
 
+    # Saved (answers still empty) so a closed tab can bring the same
+    # questions back instead of asking the agent for new ones.
+    current_user.onboarding_qa_json = [{"question": q, "answer": None} for q in payload["questions"]]
     current_user.onboarding_stage = OnboardingStage.QA
     db.commit()
     return {"questions": payload["questions"]}
@@ -100,6 +139,8 @@ def submit_qa(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_stage(current_user, OnboardingStage.QA)
+    _prepare_thread(current_user, db, OnboardingStage.QA)
     result = _graph.invoke(
         Command(resume={"answers": payload.answers, "intro_text": payload.intro_text}),
         config=_config(current_user),
@@ -109,6 +150,7 @@ def submit_qa(
     current_user.intro_text = payload.intro_text
     current_user.onboarding_qa_json = result.get("questions", [])
     current_user.suggested_track = TrackEnum(result["suggested_track"])
+    current_user.suggested_track_reasoning = data["reasoning"]
     current_user.onboarding_stage = OnboardingStage.TRACK
     db.commit()
     return {"suggested_track": data["suggested_track"], "reasoning": data["reasoning"]}
@@ -120,6 +162,8 @@ def approve_track(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_stage(current_user, OnboardingStage.TRACK)
+    _prepare_thread(current_user, db, OnboardingStage.TRACK)
     result = _graph.invoke(
         Command(resume={"track": payload.track.value if payload.track else None}),
         config=_config(current_user),
@@ -128,6 +172,7 @@ def approve_track(
 
     current_user.track = TrackEnum(result["approved_track"])
     current_user.track_confirmed = True
+    current_user.suggested_agent_ids_json = list(data["suggested_agent_ids"])
     current_user.onboarding_stage = OnboardingStage.AGENTS
     db.commit()
 
@@ -145,6 +190,10 @@ def approve_agents(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # COMPLETE is allowed too: re-submitting is how a graduate edits their
+    # roster after finishing (the idempotent replace below).
+    _require_stage(current_user, OnboardingStage.AGENTS, OnboardingStage.COMPLETE)
+    _prepare_thread(current_user, db, OnboardingStage.AGENTS)
     result = _graph.invoke(
         Command(resume={"agent_ids": payload.agent_ids}),
         config=_config(current_user),
@@ -174,6 +223,31 @@ def read_onboarding_state(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@router.get("/resume", response_model=OnboardingResumeOut)
+def resume_onboarding(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """What the wizard needs to re-draw the step the graduate stopped on —
+    read purely from what was saved at each pause, so it costs no LLM call and
+    works after a closed tab, a server restart or a deploy. `resumable: false`
+    means "nothing to restore, start at the CV step"."""
+    stage = current_user.onboarding_stage
+    out: dict = {"onboarding_stage": stage, "resumable": can_resume(current_user, stage)}
+    if not out["resumable"]:
+        return out
+    if stage == OnboardingStage.QA:
+        out["questions"] = [item["question"] for item in current_user.onboarding_qa_json]
+        out["intro_text"] = current_user.intro_text
+    elif stage == OnboardingStage.TRACK:
+        out["suggested_track"] = current_user.suggested_track
+        out["reasoning"] = current_user.suggested_track_reasoning
+    elif stage == OnboardingStage.AGENTS:
+        ids = current_user.suggested_agent_ids_json or []
+        out["suggested_agents"] = db.query(AgentCatalog).filter(AgentCatalog.id.in_(ids)).all() if ids else []
+    return out
+
+
 @router.post("/reset", response_model=OnboardingStateOut)
 def reset_onboarding(
     current_user: User = Depends(get_current_user),
@@ -187,9 +261,12 @@ def reset_onboarding(
     account. Also the safe fix for pre-Stage-2 users whose stage was
     never properly initialized and who'd otherwise be stuck on the
     'already done' screen forever."""
+    drop_thread(_graph, current_user)
     current_user.onboarding_stage = OnboardingStage.CV
     current_user.track_confirmed = False
     current_user.suggested_track = None
+    current_user.suggested_track_reasoning = None
+    current_user.suggested_agent_ids_json = None
     current_user.onboarding_qa_json = []
     db.commit()
     db.refresh(current_user)

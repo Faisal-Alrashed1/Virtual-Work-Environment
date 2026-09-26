@@ -72,12 +72,15 @@ def register_and_login(email):
 with patch(
     "app.agents.graph.onboarding_graph.small_model_chain",
     return_value=[("anthropic", FakeModel(FAKE_RESPONSES))],
+), patch(
+    "app.agents.graph.cv_parsing.call_with_tool",
+    return_value={"tool_name": "classify_document", "input": {"is_cv": True, "reason": ""}},
 ):
     headers = register_and_login("stage2-router-test@example.com")
 
     r = client.get("/onboarding/catalog")
     check("catalog -> 200, no auth required", r.status_code == 200)
-    check("catalog has all 4 seeded agents", len(r.json()) == 4)
+    check("catalog has all 7 seeded agents", len(r.json()) == 7)
     check("catalog entries have id/name/description", all(set(a) == {"id", "name", "description"} for a in r.json()))
 
     # --- step 1: upload a CV file (plain text — extract_cv_text falls
@@ -133,6 +136,13 @@ with patch(
     check("my agents -> 200", r.status_code == 200)
     check("my agents reflects the approved roster", [a["id"] for a in r.json()] == ["security_reviewer"])
 
+    # re-submitting the same roster while onboarding is complete is how a
+    # graduate edits it — it must be idempotent, not duplicate rows
+    r = client.post("/onboarding/agents", headers=headers, json={"agent_ids": ["security_reviewer"]})
+    check("re-approving agents (edit after complete) doesn't error", r.status_code == 200)
+    r = client.get("/users/me/agents", headers=headers)
+    check("re-approving agents doesn't duplicate the roster", [a["id"] for a in r.json()] == ["security_reviewer"])
+
     # --- reset sends a completed graduate back to the start, without
     # wiping their CV or selected agents ---
     r = client.post("/onboarding/reset", headers=headers)
@@ -144,9 +154,10 @@ with patch(
     r = client.get("/users/me/agents", headers=headers)
     check("reset leaves selected agents intact", [a["id"] for a in r.json()] == ["security_reviewer"])
 
-    # re-submitting the same roster should be idempotent, not duplicate
+    # approving the roster out of order (the wizard was just reset to the CV
+    # step) is refused with a clear 409 rather than resuming a stale graph
     r = client.post("/onboarding/agents", headers=headers, json={"agent_ids": ["security_reviewer"]})
-    check("re-approving agents doesn't error", r.status_code == 200)
+    check("approving agents after a reset (out of order) -> 409", r.status_code == 409)
 
     # --- a second graduate overrides the track instead of approving it ---
     headers2 = register_and_login("stage2-router-test-2@example.com")

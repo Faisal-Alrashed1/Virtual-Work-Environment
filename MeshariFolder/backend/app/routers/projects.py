@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.materials import MAX_MATERIALS_FILES, combine_materials
 from app.models import Project, ProjectSource, ProjectStatus, User
-from app.schemas import OwnProjectCreate, ProjectDetailOut, ProjectOut
+from app.schemas import ProjectDetailOut, ProjectOut
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -35,7 +36,10 @@ def get_my_project(
 
 @router.post("/own", response_model=ProjectOut, status_code=201)
 def create_own_project(
-    payload: OwnProjectCreate,
+    title: str = Form(...),
+    description: str = Form(...),
+    materials_text: str | None = Form(None),
+    files: list[UploadFile] = File(default=[]),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -48,10 +52,12 @@ def create_own_project(
     doesn't already have an active one, so creating one here first makes
     the very next assign-task call plan straight into it instead.
 
-    No changes needed in manager.plan_week to make this work — it already
-    only reads project.title/description, which read the same whether the
-    Manager or the graduate wrote them.
+    materials_text and/or files (PDF/Word/text, up to MAX_MATERIALS_FILES) are
+    optional — real material about the project so manager.plan_week can plan
+    actual subtasks instead of working from a one-line description. See
+    app.materials.combine_materials and docs/STAGE2_OWN_PROJECT.md.
     """
+    materials = combine_materials(materials_text, files)
     existing = (
         db.query(Project)
         .filter(Project.user_id == current_user.id, Project.status == ProjectStatus.ACTIVE)
@@ -65,9 +71,10 @@ def create_own_project(
 
     project = Project(
         user_id=current_user.id,
-        title=payload.title,
-        description=payload.description,
+        title=title,
+        description=description,
         source=ProjectSource.OWN,
+        materials_text=materials,
     )
     db.add(project)
     db.commit()

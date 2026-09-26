@@ -18,32 +18,33 @@ grounding — the current project/week) helps any of them give a useful
 answer. The model just replies in plain text here; there are no tools to
 call in a conversation, so this uses call_agentic with an empty tool list
 rather than call_with_tool.
+
+The Team Room (bottom of this file, docs/TEAM_ROOM.md) is this same
+Meeting Room's *shared* mode: one thread per user instead of one per
+(user, agent), where the whole team and the graduate talk together.
+Every message the graduate sends is routed to whichever single teammate
+fits best (route_team_message) rather than every agent replying at once —
+but the thread itself shows everyone who has spoken, so past replies from
+other agents stay visible and later replies can refer to them.
 """
 from sqlalchemy.orm import Session
 
 from app.agents import hr, manager, mentor
-from app.agents.language import LANGUAGE_RULE
-from app.agents.llm_client import call_agentic
-from app.agents.submission_files import read_submitted_files
+from app.agents.guardrails import MANAGER_DELEGATES_TASK_WORK, ROLE_BOUNDARY
+from app.agents.llm_client import call_agentic, call_with_tool
 from app.models import (
     AgentCatalog,
     AgentType,
     ChatMessage,
     Project,
     ProjectStatus,
-    Review,
-    ReviewKind,
     SenderType,
-    Task,
+    TeamMessage,
     User,
     UserAgent,
     Week,
     WeekStatus,
 )
-
-# Same per-file slice as the Mentor's review. A smaller one (1,500) left
-# the model saying it had only seen part of a typical solution file.
-_FILE_CHARS_FOR_MEETING = 4000
 
 PERSONA: dict[AgentType, str] = {
     AgentType.MANAGER: manager.SYSTEM_PROMPT,
@@ -74,6 +75,26 @@ PERSONA: dict[AgentType, str] = {
         "specific and hands-on — concrete commands or config where "
         "relevant, not abstract best-practice lists."
     ),
+    AgentType.QA_ENGINEER: (
+        "You are the QA Engineer at Venv, helping a recent graduate think "
+        "through testing — what to actually test, edge cases they might "
+        "have missed, how to structure a test suite. Be concrete: name "
+        "the specific case or scenario, don't just say 'add more tests.'"
+    ),
+    AgentType.UX_REVIEWER: (
+        "You are the UX Reviewer at Venv, helping a recent graduate think "
+        "through interface and interaction quality — clarity, "
+        "accessibility, what a real user would find confusing. Be "
+        "specific about what you'd actually change and why, not generic "
+        "design-principle lectures."
+    ),
+    AgentType.TECHNICAL_WRITER: (
+        "You are the Technical Writer at Venv, helping a recent graduate "
+        "with documentation and written communication — READMEs, PR "
+        "descriptions, code comments, commit messages. Be concrete: "
+        "point at the actual sentence or section that needs work and say "
+        "what to write instead, not generic 'be clearer' advice."
+    ),
 }
 
 _DEFAULT_AGENTS = {AgentType.MANAGER, AgentType.MENTOR, AgentType.HR}
@@ -90,23 +111,24 @@ def is_on_users_team(db: Session, user: User, agent: AgentType) -> bool:
         is not None
     )
 
+
+def team_roster(db: Session, user: User) -> list[AgentType]:
+    """Every agent on the graduate's team, defaults first — the Team
+    Room's cast of characters (docs/TEAM_ROOM.md)."""
+    rows = (
+        db.query(AgentCatalog.agent_type)
+        .join(UserAgent, UserAgent.agent_catalog_id == AgentCatalog.id)
+        .filter(UserAgent.user_id == user.id)
+        .all()
+    )
+    return [AgentType.MANAGER, AgentType.MENTOR, AgentType.HR] + [row[0] for row in rows]
+
 _MEETING_FRAMING = (
     "\n\nYou're in a one-on-one meeting with this graduate — an open "
     "conversation, not tied to any specific task. Answer their questions "
     "directly and helpfully in your own voice, staying in character. Keep "
     "replies concise and conversational (a few sentences), not essays."
-    # Without this, the model answered "I can't see files you sent" even
-    # though the submission's content was in its context (live-tested).
-    "\n\nYou work inside the Venv platform and have access to what the "
-    "graduate submitted: below, under 'most recent submission', is the "
-    "actual content of the last work they sent (their files, notes, and "
-    "the Mentor's review of it). When they ask about their solution, their "
-    "work, or what they sent, answer from that content — name the file and "
-    "talk about what's in it. Never say you can't see their files or ask "
-    "them to paste it again when it's there. If an earlier reply in this "
-    "conversation said you couldn't see it, that was wrong: correct it "
-    "plainly. If the section says nothing has been submitted, tell them "
-    "that instead."
+    + ROLE_BOUNDARY
 )
 
 
@@ -136,53 +158,7 @@ def _shared_context(db: Session, user: User) -> str:
                 f"Current week {week.week_number}: {week.big_task_title} — "
                 f"{week.big_task_description}"
             )
-    parts.append(
-        _latest_submission_context(db, user)
-        or "Their most recent submission: nothing has been submitted yet."
-    )
     return "\n".join(parts) if parts else "No CV, project, or history yet."
-
-
-def _latest_submission_context(db: Session, user: User) -> str | None:
-    """What the graduate most recently submitted, and the Mentor's latest
-    review of it — so "what did you think of my solution?" in a meeting
-    gets an answer about the actual work (docs/TEAM_CHANGES.md #10).
-    Before, meeting agents only knew the CV and the project."""
-    task = (
-        db.query(Task)
-        .filter(Task.user_id == user.id, Task.submitted_at.isnot(None))
-        .order_by(Task.submitted_at.desc())
-        .first()
-    )
-    if task is None:
-        return None
-    parts = [
-        f"Their most recent submission — task \"{task.title}\" "
-        f"(status: {task.status.value}):\n{task.description}"
-    ]
-    if task.github_link:
-        parts.append(f"GitHub link: {task.github_link}")
-    if task.submission_text:
-        parts.append(f"Their notes: {task.submission_text}")
-    readable, unreadable = read_submitted_files(task, max_chars_per_file=_FILE_CHARS_FOR_MEETING)
-    for filename, text in readable:
-        parts.append(f"--- {filename} ---\n{text}")
-    if unreadable:
-        parts.append("Also attached, but not readable here: " + ", ".join(unreadable))
-    review = (
-        db.query(Review)
-        .filter(
-            Review.task_id == task.id,
-            Review.agent_type == AgentType.MENTOR,
-            Review.kind == ReviewKind.TASK_REVIEW,
-        )
-        .order_by(Review.created_at.desc())
-        .first()
-    )
-    if review:
-        verdict = (review.metrics_json or {}).get("verdict", "?")
-        parts.append(f"The Mentor's latest review of it ({verdict}): {review.content}")
-    return "\n".join(parts)
 
 
 def get_history(db: Session, user: User, agent: AgentType) -> list[ChatMessage]:
@@ -217,7 +193,11 @@ def send_message(
         }
         for m in history
     ]
-    system = PERSONA[agent] + _MEETING_FRAMING + LANGUAGE_RULE + "\n\n" + _shared_context(db, user)
+    # The Manager redirects hands-on task asks to the Mentor here too, not
+    # just in a task thread — "ask the manager for a small task" is the
+    # same overreach whether it happens in the Meeting Room or on a task.
+    delegate = MANAGER_DELEGATES_TASK_WORK if agent == AgentType.MANAGER else ""
+    system = PERSONA[agent] + _MEETING_FRAMING + delegate + "\n\n" + _shared_context(db, user)
 
     reply_obj = call_agentic(
         system=system,
@@ -232,6 +212,134 @@ def send_message(
         agent_type=agent,
         sender_type=SenderType.AGENT,
         content=reply_text,
+    )
+    db.add(reply)
+    db.commit()
+    db.refresh(reply)
+    return reply
+
+
+# ---------------------------------------------------------------------------
+# Team Room — the Meeting Room's shared mode (docs/TEAM_ROOM.md): one
+# thread per user (TeamMessage) instead of one per (user, agent), where the
+# graduate talks to their whole team at once. Each graduate message is
+# routed to whichever single teammate fits best (a cheap small-tier tool
+# call), rather than every agent replying — a genuinely shared room reads
+# as one conversation, not a wall of simultaneous answers. The chosen
+# agent still sees everyone's past turns, so it can pick up on what a
+# teammate said earlier.
+# ---------------------------------------------------------------------------
+
+ROUTE_TOOL_NAME = "route_to_agent"
+
+
+def _route_tool(roster: list[AgentType]) -> dict:
+    return {
+        "name": ROUTE_TOOL_NAME,
+        "description": (
+            "Pick the single team member best placed to reply to the "
+            "graduate's latest message in the Team Room."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "enum": [a.value for a in roster],
+                    "description": "Which team member should reply.",
+                },
+            },
+            "required": ["agent"],
+        },
+    }
+
+
+def _router_system(roster: list[AgentType]) -> str:
+    names = ", ".join(a.value for a in roster)
+    return (
+        "You are routing messages in Venv's Team Room, a shared chat where a "
+        f"graduate talks with their whole team at once: {names}. Given the "
+        "conversation so far, decide which ONE team member is best placed to "
+        "reply to the graduate's latest message — whichever one it's actually "
+        "their job to answer. Default to the Manager only for something "
+        "genuinely about the project or team as a whole; prefer a specific "
+        "specialist whenever the message is about their particular area "
+        "(code/review questions -> Mentor, growth/behavior -> HR, security -> "
+        "Security Reviewer, and so on)."
+    )
+
+
+def get_team_history(db: Session, user: User) -> list[TeamMessage]:
+    return (
+        db.query(TeamMessage)
+        .filter(TeamMessage.user_id == user.id)
+        .order_by(TeamMessage.created_at)
+        .all()
+    )
+
+
+def _team_thread_messages(history: list[TeamMessage]) -> list[dict]:
+    """Every past turn as one role-tagged sequence, agent replies labeled
+    by speaker inline (there's no per-agent 'role' in a chat completion,
+    so the label is how a reply from one agent lets a later agent — or
+    the router — know who already said what)."""
+    return [
+        {
+            "role": "assistant" if m.sender_type == SenderType.AGENT else "user",
+            "content": f"[{m.agent_type.value}] {m.content}" if m.agent_type else m.content,
+        }
+        for m in history
+    ]
+
+
+def _choose_responder(db: Session, user: User, roster: list[AgentType], thread: list[dict]) -> AgentType:
+    """Best-effort: a routing failure never blocks the room, it just falls
+    back to the Manager, same spirit as roundtable.py's per-agent
+    best-effort turns."""
+    try:
+        result = call_with_tool(
+            system=_router_system(roster),
+            messages=thread,
+            tools=[_route_tool(roster)],
+            force_tool=ROUTE_TOOL_NAME,
+            tier="small",
+        )
+        chosen = AgentType(result["input"]["agent"])
+        return chosen if chosen in roster else AgentType.MANAGER
+    except Exception:
+        return AgentType.MANAGER
+
+
+def send_team_message(db: Session, user: User, content: str) -> TeamMessage:
+    """Stores the graduate's message, routes it to whichever teammate fits,
+    generates and stores that agent's reply, returns it."""
+    db.add(TeamMessage(user_id=user.id, sender_type=SenderType.USER, content=content))
+    db.commit()
+
+    roster = team_roster(db, user)
+    thread = _team_thread_messages(get_team_history(db, user))
+    chosen = _choose_responder(db, user, roster, thread)
+
+    names = ", ".join(a.value for a in roster)
+    delegate = MANAGER_DELEGATES_TASK_WORK if chosen == AgentType.MANAGER else ""
+    system = (
+        PERSONA[chosen]
+        + "\n\nYou're in the Team Room — a shared conversation with the "
+        f"graduate and the rest of the team ({names}), not a private chat. "
+        "Other teammates may have spoken earlier in this thread (their turns "
+        "are labeled by who said them); you can refer to what they said. "
+        "Reply only as yourself, in your own voice — don't speak for anyone "
+        "else. Keep it concise and conversational."
+        + delegate
+        + ROLE_BOUNDARY
+        + "\n\n"
+        + _shared_context(db, user)
+    )
+    reply_obj = call_agentic(system=system, messages=thread, tools=[], max_tokens=1000)
+    reply_text = reply_obj.text or "Sorry, I didn't catch that — could you rephrase?"
+
+    reply = TeamMessage(
+        user_id=user.id, sender_type=SenderType.AGENT, agent_type=chosen, content=reply_text
     )
     db.add(reply)
     db.commit()

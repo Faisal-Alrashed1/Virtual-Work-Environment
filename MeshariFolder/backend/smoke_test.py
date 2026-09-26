@@ -3,6 +3,7 @@ Quick end-to-end sanity check against an in-memory-style sqlite db.
 Run: python smoke_test.py
 """
 import os
+from unittest.mock import patch
 
 os.environ["DATABASE_URL"] = os.environ.get(
     "DATABASE_URL", "sqlite:///./smoke_test.db"
@@ -64,7 +65,11 @@ r = client.get("/users/me")
 check("unauthenticated request rejected", r.status_code == 401)
 
 # submit CV
-r = client.post("/users/me/cv", json={"cv_raw_text": "Experienced in Python and React."}, headers=headers)
+with patch(
+    "app.agents.graph.cv_parsing.call_with_tool",
+    return_value={"tool_name": "classify_document", "input": {"is_cv": True, "reason": ""}},
+):
+    r = client.post("/users/me/cv", json={"cv_raw_text": "Experienced in Python and React."}, headers=headers)
 check("submit cv", r.status_code == 200)
 check("submit cv response has_cv is true", r.json()["has_cv"] is True)
 

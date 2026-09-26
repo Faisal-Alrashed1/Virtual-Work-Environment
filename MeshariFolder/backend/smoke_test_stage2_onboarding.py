@@ -94,7 +94,7 @@ check("track_confirmed defaults False", user.track_confirmed is False)
 
 seed_agent_catalog(db)
 count_after_first_seed = db.query(AgentCatalog).count()
-check("catalog seeded with 4 entries", count_after_first_seed == 4)
+check("catalog seeded with 7 entries", count_after_first_seed == 7)
 
 seed_agent_catalog(db)  # calling again should not duplicate
 check("re-seeding is idempotent", db.query(AgentCatalog).count() == count_after_first_seed)

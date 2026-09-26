@@ -13,61 +13,69 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.agents.github_client import fetch_repo_context
-from app.agents.language import LANGUAGE_RULE
-from app.agents.llm_client import call_with_tool
-from app.agents.submission_files import read_submitted_files
-from app.agents.tools import SUBMIT_REVIEW_TOOL
+from app.agents.guardrails import MENTOR_TASK_SENIOR_FRAMING, ROLE_BOUNDARY
+from app.agents.llm_client import call_agentic, call_with_tool
+from app.agents.rubric import RUBRIC_VERSION, apply_rubric_rules, system_prompt
+from app.agents.tools import POST_MESSAGE_TOOL, SUBMIT_REVIEW_TOOL
 from app.models import AgentType, Review, ReviewKind, SenderType, Task, TaskMessage, TaskStatus, User
 from app.storage import read_attachment_base64
 
-SYSTEM_PROMPT = (
-    "You are the Mentor at Venv, reviewing a recent graduate's submitted "
-    "work. Be specific and constructive: point at what's actually in the "
-    "repo, the notes they left, or the images/files they attached — not "
-    "generic advice. Only judge files whose content you were actually "
-    "shown — if a file couldn't be opened, say so instead of guessing "
-    "what's in it. You can't approve work you haven't seen: if the "
-    "deliverable itself isn't in what you were shown (only a file you "
-    "couldn't open, or notes describing work without the work), use "
-    "'needs_changes' and say what's missing. Score each rubric category 1-5. Use 'needs_changes' "
-    "only when something genuinely blocks the task's goal — minor gaps "
-    "(missing tests, thin docs) can still be 'approved' with a comment "
-    "about what to improve next time, the way a real early-career review "
-    "would handle it."
-)
+# The rubric, anchors, verdict rule and review style live in agents/rubric.py
+# (docs/MENTOR_RUBRIC.md) so the team can read and tune them in one place.
+SYSTEM_PROMPT = system_prompt()
+
+
+def _previous_feedback(task: Task) -> str | None:
+    """What the Mentor asked for last time, if the task was bounced. Without
+    this a resubmission is reviewed blind: the Mentor can't check its own
+    requests were met, and tends to invent new ones (an endless bounce)."""
+    reviews = sorted(
+        (r for r in task.reviews if r.kind == ReviewKind.TASK_REVIEW),
+        key=lambda r: r.created_at,
+    )
+    if not reviews or (reviews[-1].metrics_json or {}).get("verdict") != "needs_changes":
+        return None
+    last = reviews[-1]
+    lines = [f"Your previous review asked for changes.\nSummary: {last.content}"]
+    for c in (last.metrics_json or {}).get("comments", []):
+        if isinstance(c, dict):
+            lines.append(f"- [{c.get('category')}] {c.get('content')}")
+        else:  # a model that returned plain strings
+            lines.append(f"- {c}")
+    return "\n".join(lines)
+
+
+def _context_line(task: Task, user: User, previous: str | None) -> str:
+    bits = [f"Graduate's track: {user.track.value}."]
+    if task.week is not None:
+        bits.append(f"Program week: {task.week.week_number}.")
+    revisions = sum(
+        1 for r in task.reviews
+        if r.kind == ReviewKind.TASK_REVIEW and (r.metrics_json or {}).get("verdict") == "needs_changes"
+    )
+    bits.append(f"This is revision {revisions + 1} of this task." if previous else "This is the first submission of this task.")
+    return " ".join(bits)
 
 
 def review_task(db: Session, task: Task, user: User) -> Review:
     images = [a for a in task.attachments if a.content_type.startswith("image/")]
-    image_names = {a.filename for a in images}
-    # Uploaded code/text/notebooks go in as their actual content. Before
-    # this, only their names did (with "judge by name/context"), so the
-    # Mentor reviewed code it never saw — in a live test it missed a
-    # hardcoded password in a file it had "reviewed".
-    readable_files, unreadable = read_submitted_files(task)
-    unreadable_files = [name for name in unreadable if name not in image_names]
+    other_files = [a for a in task.attachments if not a.content_type.startswith("image/")]
 
     if not task.github_link and not task.submission_text and not task.attachments:
         raise ValueError("Task has no submission to review yet.")
 
-    # Only files that can't be opened (a PDF, a zip...) and nothing else:
-    # there's no work to look at. Asking the model anyway is what made it
-    # invent a whole review — in a live test it "approved" a CV PDF as a
-    # finished project setup with 5/5. Decide this in code instead.
-    if not (task.github_link or task.submission_text or readable_files or images):
-        return _save_review(db, task, user, _not_reviewable(unreadable_files))
-
-    parts = [f"Task assigned: {task.title}\n{task.description}\n"]
+    previous = _previous_feedback(task)
+    parts = [f"Task assigned: {task.title}\n{task.description}\n", _context_line(task, user, previous) + "\n"]
+    if previous:
+        parts.append(previous + "\n")
     if task.github_link:
         parts.append(f"Submitted repo:\n{fetch_repo_context(task.github_link)}\n")
     if task.submission_text:
         parts.append(f"Graduate's own notes on this submission:\n{task.submission_text}\n")
-    for filename, text in readable_files:
-        parts.append(f"--- {filename} (submitted file) ---\n{text}\n")
-    if unreadable_files:
+    if other_files:
         parts.append(
-            "Also submitted, but can't be opened here (don't guess at their "
-            "contents): " + ", ".join(unreadable_files) + "\n"
+            "Other files submitted (not previewable here, judge by name/"
+            "context): " + ", ".join(a.filename for a in other_files) + "\n"
         )
     if images:
         parts.append(f"{len(images)} image(s) submitted — shown below.\n")
@@ -95,44 +103,13 @@ def review_task(db: Session, task: Task, user: User) -> Review:
         message_content = text_prompt
 
     result = call_with_tool(
-        system=SYSTEM_PROMPT + LANGUAGE_RULE,
+        system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": message_content}],
         tools=[SUBMIT_REVIEW_TOOL],
         force_tool="submit_review",
         max_tokens=2000,
     )
-    return _save_review(db, task, user, result["input"])
-
-
-def _not_reviewable(unreadable_files: list[str]) -> dict:
-    """A needs_changes review with no rubric scores — nothing was scored,
-    so there's nothing to average (dashboard.py and the growth view both
-    skip reviews without categories)."""
-    return {
-        "verdict": "needs_changes",
-        "summary": (
-            "I couldn't review this submission: I can't open "
-            + ", ".join(unreadable_files)
-            + ". Only code/text files, notebooks, images, notes, or a GitHub "
-            "link can be reviewed here, and nothing I can see shows the task "
-            "was done, so I can't approve it yet. Please upload the actual "
-            "work (e.g. your .py files and requirements.txt) or link a public "
-            "GitHub repo, then resubmit."
-        ),
-        "categories": [],
-        "comments": [],
-        "not_reviewable": True,
-    }
-
-
-def _save_review(db: Session, task: Task, user: User, data: dict) -> Review:
-    metrics = {
-        "verdict": data["verdict"],
-        "categories": data["categories"],
-        "comments": data["comments"],
-    }
-    if data.get("not_reviewable"):
-        metrics["not_reviewable"] = True
+    data, verdict_adjusted = apply_rubric_rules(result["input"])
 
     review = Review(
         user_id=user.id,
@@ -141,7 +118,15 @@ def _save_review(db: Session, task: Task, user: User, data: dict) -> Review:
         agent_type=AgentType.MENTOR,
         kind=ReviewKind.TASK_REVIEW,
         content=data["summary"],
-        metrics_json=metrics,
+        metrics_json={
+            "verdict": data["verdict"],
+            "categories": data["categories"],
+            "comments": data["comments"],
+            # Traceability ("how was this decided?"): which rubric produced it,
+            # and whether the verdict had to be brought in line with the scores.
+            "rubric_version": RUBRIC_VERSION,
+            "verdict_adjusted": verdict_adjusted,
+        },
     )
     db.add(review)
 
@@ -167,3 +152,48 @@ def _save_review(db: Session, task: Task, user: User, data: dict) -> Review:
     db.commit()
     db.refresh(review)
     return review
+
+
+def respond_in_thread(db: Session, task: Task, user: User) -> TaskMessage:
+    """Replies in a task's comment thread — the Mentor's day-to-day presence
+    on the task itself, working through it with the graduate the way a
+    senior engineer would (guardrails.MENTOR_TASK_SENIOR_FRAMING). Separate
+    from review_task's formal, structured review once they actually submit.
+    Called after the graduate posts a message via POST /tasks/{id}/messages,
+    when they're addressing the Mentor — the default in-task agent as of
+    docs/TASK_CHAT.md, routed through agents/task_chat.py."""
+    history = [
+        {
+            "role": "assistant" if m.sender_type == SenderType.AGENT else "user",
+            "content": m.content,
+        }
+        for m in task.messages
+    ]
+    system = (
+        SYSTEM_PROMPT
+        + f"\n\nCurrent task: {task.title} — {task.description}\n"
+        + f"Status: {task.status.value}."
+        + MENTOR_TASK_SENIOR_FRAMING
+        + ROLE_BOUNDARY
+    )
+    reply = call_agentic(
+        system=system,
+        messages=history or [{"role": "user", "content": "(no messages yet)"}],
+        tools=[POST_MESSAGE_TOOL],
+    )
+
+    content = next(
+        (c.input["content"] for c in reply.tool_calls if c.name == "post_message"), None
+    )
+    content = content or reply.text or "Tell me a bit more about where you're stuck — happy to work through it with you."
+
+    message = TaskMessage(
+        task_id=task.id,
+        sender_type=SenderType.AGENT,
+        agent_type=AgentType.MENTOR,
+        content=content,
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+    return message

@@ -2,7 +2,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
@@ -34,7 +34,14 @@ def _get_owned_task(task_id: str, current_user: User, db: Session) -> Task:
 @router.get("", response_model=list[TaskOut])
 def list_my_tasks(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Powers the task board columns (To Do / In Progress / Submitted / Reviewed)."""
-    return db.query(Task).filter(Task.user_id == current_user.id).all()
+    # selectinload: needs_changes/revision_count read each task's reviews —
+    # load them all in one extra query instead of one per task.
+    return (
+        db.query(Task)
+        .options(selectinload(Task.reviews))
+        .filter(Task.user_id == current_user.id)
+        .all()
+    )
 
 
 @router.post("", response_model=TaskOut, status_code=201)

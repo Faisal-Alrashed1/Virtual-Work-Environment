@@ -38,16 +38,33 @@ class Settings(BaseSettings):
     deepseek_small_model: str = "deepseek-chat"
 
     qwen_api_key: str = ""
+    # Optional. Without it the Mentor reads submitted repos through GitHub's anonymous
+    # API, limited to 60 requests/hour per IP - and each submission costs 3 (repo
+    # info, file tree, README), so ~20 reviews an hour, shared by everyone behind one
+    # IP. A token (no scopes needed for public repos) raises that to 5,000/hour.
+    github_token: str = ""
     qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     qwen_model: str = "qwen-max"
     qwen_small_model: str = "qwen-turbo"
 
-    # Optional. Raises GitHub's API limit from 60 to 5,000 requests/hour
-    # and lets the agents read private repos the token can see — see
-    # app/agents/github_client.py.
-    github_token: str = ""
-
     upload_dir: str = "uploads"
+
+    # Real invitation emails (docs/STAGE3_COMPANY_RAG.md, app/email.py) —
+    # plain smtplib, works with any SMTP provider (Gmail, SendGrid,
+    # Mailgun, AWS SES, Postmark's SMTP relay, or a real mail server).
+    # Optional: leaving smtp_host blank means send_invitation_email is a
+    # documented no-op rather than an error — an invitation always still
+    # exists and is findable via GET /invitations/mine regardless of
+    # whether an email goes out.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "no-reply@venv.dev"
+    smtp_use_tls: bool = True
+    # Where an invitation email's link points — the frontend's own origin,
+    # not this API's.
+    frontend_base_url: str = "http://localhost:3000"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

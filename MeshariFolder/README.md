@@ -7,23 +7,26 @@ specialist agents (Security Reviewer, Data Reviewer, Career Coach, DevOps)
 that actually **discuss submissions with each other** before the Manager
 synthesizes what matters most.
 
-**Current status — Stage 2 is complete and merged to `main`.** Stage 1's
+**Current status — Stage 2 is complete and merged to `main`,** with
+Arabic (RTL) support and a light theme on top of it. Stage 1's
 weekly-cycle flow (a Manager-planned project → one big task per week → 5
 subtasks handed out one at a time → Mentor review of each → end-of-week
 Manager progress + HR behavioral evaluation) plus Stage 2's additions: CV
 file intake with agent-generated follow-up questions, track selection
-across six IT majors, an own-project path, a first-time orientation
-screen, a Meeting Room open to any agent on your team, multi-modal task
-submissions (link/text/images/files, with real vision review), and the
-**agent roundtable** — optional agents building on each other's comments
-in sequence, not just posting in parallel. See `docs/PROJECT_STATUS.md`
-for the exact feature-by-feature state (start there — it links every
-Stage 2 doc in build order) and `docs/STAGE1_PRODUCT_FLOW.md` for the
-weekly-cycle spec that started it all.
+across six IT majors, an own-project path, a guided first-time
+orientation walkthrough, a Meeting Room open to any agent on your team,
+multi-modal task submissions (link/text/images/files, with real vision
+review), the **agent roundtable** — optional agents building on each
+other's comments in sequence, not just posting in parallel — and
+multi-provider LLM support (Anthropic/OpenAI/DeepSeek/Qwen) with
+intelligent, tier-aware provider routing and automatic failover. See
+`docs/PROJECT_STATUS.md` for the exact feature-by-feature state (start
+there — it links every Stage 2 doc in build order) and
+`docs/STAGE1_PRODUCT_FLOW.md` for the weekly-cycle spec that started it
+all.
 
-**Next up (see `docs/PROJECT_STATUS.md`'s handoff section):** reworking
-the onboarding/orientation greeting for new users, Arabic language
-support, and a light-mode theme — then Stage 3.
+**Next up:** see `docs/PROJECT_STATUS.md`'s handoff section — no
+specific work is queued as of this writing.
 
 ## Repo structure
 
@@ -88,15 +91,27 @@ python smoke_test_agents.py                    # Manager/Mentor/HR basics (19)
 python smoke_test_weekly_cycle.py              # Project/Week schema + iterative review (17)
 python smoke_test_orchestration.py             # full weekly cycle, end to end (57)
 python smoke_test_meeting.py                   # direct agent chat, Stage 1 scope (15)
-python smoke_test_llm_errors.py                # graceful LLM-failure handling (8)
+python smoke_test_llm_errors.py                # graceful LLM-failure handling (10)
+python smoke_test_llm_provider_routing.py      # tier-aware provider selection (14)
 python smoke_test_stage2_onboarding.py         # onboarding graph, isolated (28)
-python smoke_test_stage2_onboarding_router.py  # onboarding endpoints incl. reset (34)
+python smoke_test_stage2_onboarding_router.py  # onboarding endpoints incl. reset (36)
 python smoke_test_stage2_collaboration.py      # Manager/HR consulting the Mentor (9)
 python smoke_test_stage2_own_project.py        # bring-your-own-project path (12)
 python smoke_test_stage2_meeting.py            # Meeting Room roster gating (9)
 python smoke_test_stage2_submissions.py        # multi-modal submission + vision (41)
 python smoke_test_stage2_co_reviews.py         # parallel co-reviewers, unit-level (11)
 python smoke_test_stage2_roundtable.py         # the agent roundtable, end to end (20)
+python smoke_test_migrations.py                # Alembic + model-drift guard (19; +10 with Postgres)
+python smoke_test_stage2_onboarding_resume.py  # restart-proof onboarding + CV replacement (54)
+python smoke_test_needs_changes.py             # visible 'needs changes' state (29)
+python smoke_test_agent_language.py            # agents answer in Arabic + the browser CORS preflight (34)
+python smoke_test_mentor_rubric.py             # Mentor rubric v2 + enforcement (49)
+python smoke_test_llm_tool_output.py           # repair / retry / fail over on unusable model output (48)
+python smoke_test_task_bank.py                 # the Manager's task bank: integrity + wiring (62)
+python smoke_test_github_client.py             # what the Mentor sees of a repo; token + rate limit (29)
+python smoke_test_background_roundtable.py     # the specialists' discussion runs after the review; real HTTP timing (43)
+python smoke_test_own_project_materials.py     # own-project notes/files reach the Manager's plan (29)
+python smoke_test_onboarding_graph_hardening.py # onboarding tool calls: repair/check/retry (16)
 ```
 
 If the LLM key is missing, wrong, or out of credit, the agent endpoints
@@ -150,9 +165,9 @@ straight to `/board`, same as before Stage 2). From registration:
 
 **The frontend talks to the real backend above** — everything is live, not
 mock data. See `frontend/README.md` and `frontend/DESIGN.md` for the
-structure and design system before adding new UI (the design-system doc is
-dark-theme-only right now — see `docs/PROJECT_STATUS.md`'s handoff section
-for the light-mode work queued up next).
+structure and design system before adding new UI (dark by default, with a
+light theme and Arabic/RTL support both built in — see `frontend/README.md`'s
+"Design system" section).
 
 ## Git workflow
 

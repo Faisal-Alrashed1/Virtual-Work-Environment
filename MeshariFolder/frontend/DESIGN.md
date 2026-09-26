@@ -194,16 +194,15 @@ dots read.
 
 **Deliberately out of scope for this pass** (English-only regardless
 of `lang`, and worth flagging before assuming they're bugs):
-- **Agent-generated content** — task titles/descriptions, Mentor
-  review text, HR's narrative summaries, meeting-room replies. This is
-  LLM output from the backend; teaching the agents to respond in
-  Arabic is a prompt/backend change, not a frontend string swap, and
-  wasn't attempted here.
+- **Agent-generated content** — *(no longer out of scope: agents now
+  answer in the UI's language; see `docs/AGENT_LANGUAGE.md`. The frontend
+  sends `X-Venv-Language` on every request, from `<html lang>`.)*
 - **Stage 2's optional-agent catalog** — the extra agents' `name`/
   `description` (Security Reviewer, Data Reviewer, etc.) come from the
   backend catalog, not `lib/i18n`, for the same reason.
-- **The Mentor's rubric category labels** (`correctness`,
-  `code_quality`, ...) — backend-defined, same as above.
+- **The Mentor's rubric category labels** — written by the model, so
+  they now follow the language; the keys (`correctness`, `code_quality`,
+  ...) stay English.
 - **The interactive agents graph** (React Flow, `flow-section.tsx`) —
   node *labels* are fully translated, but the graph's geometry (node
   x/y positions) is left unmirrored, same convention most RTL products

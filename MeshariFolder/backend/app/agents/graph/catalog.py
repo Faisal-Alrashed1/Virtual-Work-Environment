@@ -55,6 +55,46 @@ CATALOG: list[dict] = [
             TrackEnum.NETWORKS_INFRASTRUCTURE.value,
         ],
     },
+    {
+        "id": "qa_engineer",
+        "agent_type": AgentType.QA_ENGINEER,
+        "name": "QA engineer",
+        "description": (
+            "Reviews testing approach and edge-case coverage alongside "
+            "the Mentor's regular review, and answers testing questions "
+            "while you're still working on a task."
+        ),
+        "suggested_for_tracks_json": [
+            TrackEnum.SOFTWARE_ENGINEERING.value,
+            TrackEnum.DATA_SCIENCE_AI.value,
+            TrackEnum.INFORMATION_SYSTEMS.value,
+        ],
+    },
+    {
+        "id": "ux_reviewer",
+        "agent_type": AgentType.UX_REVIEWER,
+        "name": "UX reviewer",
+        "description": (
+            "Reviews interface and interaction quality alongside the "
+            "Mentor's regular review, and talks through usability "
+            "questions while you're still working on a task."
+        ),
+        "suggested_for_tracks_json": [
+            TrackEnum.SOFTWARE_ENGINEERING.value,
+            TrackEnum.INFORMATION_SYSTEMS.value,
+        ],
+    },
+    {
+        "id": "technical_writer",
+        "agent_type": AgentType.TECHNICAL_WRITER,
+        "name": "Technical writer",
+        "description": (
+            "Feedback on documentation and written communication — "
+            "READMEs, PR descriptions, comments — useful across every "
+            "track."
+        ),
+        "suggested_for_tracks_json": [t.value for t in TrackEnum],
+    },
 ]
 
 

@@ -161,4 +161,6 @@ the suggestion").
   started, `plan_week` needs a second mode that plans around a given
   project's stack instead of improvising one, per track.
 - A persistent checkpointer (see gotcha above) before this leaves a dev
-  box.
+  box. *(Resolved differently — onboarding state is saved on the `User`
+  row and the graph is rebuilt from it after a restart; see
+  `docs/ONBOARDING_RESUME.md`.)*

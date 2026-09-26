@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 
-from app.agents import orchestrator
+from app.agents import meeting, orchestrator, task_chat
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Task, TaskStatus, User
-from app.schemas import ReviewOut, TaskMessageOut, TaskOut
+from app.models import AgentType, Task, TaskStatus, User
+from app.schemas import ReviewOut, TaskChatRequest, TaskMessageOut, TaskOut
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -41,9 +41,33 @@ def manager_reply(
     return orchestrator.manager_reply(db, task, current_user)
 
 
+@router.post("/task/{task_id}/reply", response_model=TaskMessageOut, status_code=201)
+def task_chat_reply(
+    task_id: str,
+    payload: TaskChatRequest = TaskChatRequest(),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Reply in a task's thread from whichever team member the graduate is
+    addressing (docs/TASK_CHAT.md) — the Mentor by default, or the
+    Manager / a technical roster agent (Security Reviewer, Data Reviewer,
+    DevOps) if the graduate picked one in the workspace's agent switcher.
+    Call after POST /tasks/{id}/messages. This is the endpoint the app
+    itself now uses; /agents/manager/reply/{task_id} above still works
+    unchanged for anything still calling it directly."""
+    task = _get_owned_task(task_id, current_user, db)
+    if not task_chat.is_available_for_task(db, current_user, payload.agent_type):
+        raise HTTPException(
+            status_code=403,
+            detail="That agent isn't available for this task yet.",
+        )
+    return orchestrator.task_chat_reply(db, task, current_user, payload.agent_type)
+
+
 @router.post("/mentor/review/{task_id}", response_model=ReviewOut, status_code=201)
 def mentor_review(
     task_id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -66,9 +90,12 @@ def mentor_review(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     # Stage 2: Security Reviewer/Data Reviewer/DevOps weigh in too, if the
-    # graduate has any of them on their team — best-effort, never blocks
-    # the Mentor's review that already succeeded above.
-    orchestrator.run_co_reviews(db, task, current_user)
+    # graduate has any of them on their team, then the Manager synthesizes.
+    # That discussion runs in the BACKGROUND (docs/BACKGROUND_ROUNDTABLE.md): the
+    # Mentor's review — what the graduate is waiting for — is returned now, and the
+    # discussion appears in the task thread as it is written. Best-effort, never
+    # blocks or breaks the review that already succeeded above.
+    orchestrator.start_roundtable(db, task, current_user, background_tasks)
     return review
 
 
@@ -84,5 +111,24 @@ def hr_rollup(
     """
     try:
         return orchestrator.hr_rollup(db, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/career-coach/checkin", response_model=ReviewOut, status_code=201)
+def career_coach_checkin(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    """
+    The Career Coach's one dedicated action beyond chat (docs/
+    TEN_AGENTS.md): reads the Employee File and CV, writes a career
+    check-in — real resume bullets and one thing to focus on next — as a
+    standalone Review. Requires Career Coach to actually be on the
+    graduate's roster (they added it during onboarding, or later).
+    """
+    if not meeting.is_on_users_team(db, current_user, AgentType.CAREER_COACH):
+        raise HTTPException(status_code=403, detail="Career Coach isn't on your team yet.")
+    try:
+        return orchestrator.career_coach_checkin(db, current_user)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -6,7 +6,8 @@ import { AGENT_ORDER, type AgentId, type AgentMeta } from "@/lib/agents";
 import type { Dashboard } from "@/lib/dashboard";
 import type { Review } from "@/lib/reviews";
 import type { ExtraAgent } from "@/lib/team";
-import { localizeExtraAgent, useAgents, useExtraAgentText, useLocale, useRelativeTime } from "@/lib/i18n/locale";
+import { timeAgo } from "@/lib/format";
+import { useAgents, useLocale } from "@/lib/i18n/locale";
 
 interface AgentCardsProps {
   dashboard: Dashboard;
@@ -23,7 +24,6 @@ function useAgentStatus(
   reviews: Review[]
 ): { line: string; meta: string | null } {
   const { t, tPlural } = useLocale();
-  const { timeAgo } = useRelativeTime();
   if (id === "manager") {
     if (!dashboard.hasActiveProject)
       return { line: t("agentCards.waitingSetup"), meta: null };
@@ -109,13 +109,12 @@ function AgentCard({ id, meta, dashboard, reviews, index }: {
 export function AgentCards({ dashboard, reviews, extraAgents }: AgentCardsProps) {
   const { t } = useLocale();
   const agents = useAgents();
-  const extraText = useExtraAgentText();
   return (
     <div className="grid gap-3 sm:grid-cols-3">
       {AGENT_ORDER.map((id, i) => (
         <AgentCard key={id} id={id} meta={agents[id]} dashboard={dashboard} reviews={reviews} index={i} />
       ))}
-      {extraAgents.map((a) => localizeExtraAgent(a, extraText)).map((agent, i) => (
+      {extraAgents.map((agent, i) => (
         <motion.div
           key={agent.id}
           initial={{ opacity: 0, y: 8 }}

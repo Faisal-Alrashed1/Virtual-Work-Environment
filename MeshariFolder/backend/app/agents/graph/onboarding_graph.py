@@ -20,13 +20,9 @@ from langgraph.types import interrupt
 
 from app.agents.graph.models import small_model_chain
 from app.agents.graph.state import OnboardingState
-from app.agents.llm_client import (
-    ALL_PROVIDERS_FAILED,
-    FAILOVER_EXCEPTIONS,
-    TOOL_CALL_ATTEMPTS,
-    ToolCallError,
-    logger,
-)
+from app.agents.llm_client import ALL_PROVIDERS_FAILED, FAILOVER_EXCEPTIONS, MAX_ATTEMPTS_PER_PROVIDER, logger
+from app.agents.tool_output import MalformedToolOutput, check_tool_input, repair_tool_input
+from app.language import with_language
 from app.models import TrackEnum
 
 QUESTIONS_TOOL = {
@@ -96,38 +92,69 @@ AGENTS_TOOL = {
 }
 
 
-def _forced_tool_call(models: list[tuple[str, BaseChatModel]], tool: dict, messages: list) -> dict:
-    """Tries each (provider, model) pair in the given chain, in order,
-    binding the tool with tool_choice forced to it. A model that answers
-    without calling the tool is retried once, then failed over — same
-    policy as llm_client._run_chain (see ToolCallError). An availability
-    error fails over immediately. Raises ALL_PROVIDERS_FAILED once the
-    whole chain is exhausted, which main.py returns as a clean 503."""
+def _forced_tool_call(
+    models: list[tuple[str, BaseChatModel]],
+    tool: dict,
+    messages: list,
+    validate=None,
+) -> dict:
+    """Tries each (provider, model) pair in the given chain, in order, binding the
+    tool with tool_choice forced to it.
+
+    Mirrors llm_client.call_with_tool's three layers (agents/tool_output.py) so this
+    separate, LangChain-based tool-calling path gets the same protection: REPAIR what
+    can be fixed for certain (a JSON-string list, a numeric string), CHECK what would
+    break the caller (a required field missing, an array shorter than the schema's
+    minItems), then an optional caller-supplied `validate` for anything schema-shape
+    alone can't catch (e.g. a value outside a declared enum). Unusable output is
+    retried on the SAME provider up to MAX_ATTEMPTS_PER_PROVIDER times (models are
+    nondeterministic), then the next provider is tried. An availability-type error
+    (auth, network, rate limit) still fails over immediately, unretried — that
+    provider won't answer differently a moment later.
+    """
     name = tool["function"]["name"]
+    schema = tool["function"]["parameters"]
     errors = []
     for provider, model in models:
         model_name = getattr(model, "model", None) or getattr(model, "model_name", None) or "?"
-        for attempt_no in range(1, TOOL_CALL_ATTEMPTS + 1):
-            try:
+        try:
+            for attempt in range(1, MAX_ATTEMPTS_PER_PROVIDER + 1):
                 bound = model.bind_tools([tool], tool_choice=name)
                 response = bound.invoke(messages)
-                for call in response.tool_calls:
-                    if call["name"] == name:
-                        logger.info("[LLM] %s (%s, small-tier) -> %s", provider, model_name, name)
-                        return call["args"]
-                raise ToolCallError(f"model answered without calling '{name}'")
-            except ToolCallError as e:
-                logger.warning(
-                    "[LLM] %s gave an invalid '%s' call (attempt %d/%d): %s",
-                    provider, name, attempt_no, TOOL_CALL_ATTEMPTS, e,
-                )
-                if attempt_no == TOOL_CALL_ATTEMPTS:
-                    errors.append(f"{provider}: {e}")
-            except FAILOVER_EXCEPTIONS as e:
-                logger.warning("[LLM] %s unavailable (%s) — failing over", provider, e)
-                errors.append(f"{provider}: {e}")
-                break
+                args = next((c["args"] for c in response.tool_calls if c["name"] == name), None)
+                if args is None:
+                    logger.warning(
+                        "[LLM] %s returned malformed output for '%s' (attempt %d/%d): did not call it",
+                        provider, name, attempt, MAX_ATTEMPTS_PER_PROVIDER,
+                    )
+                    errors.append(f"{provider}: malformed output (did not call '{name}')")
+                    continue
+                try:
+                    args, repairs = repair_tool_input(args, schema)
+                    for repair in repairs:
+                        logger.warning("[LLM] %s repaired tool output for '%s': %s", provider, name, repair)
+                    problems = check_tool_input(args, schema)
+                    if problems:
+                        raise MalformedToolOutput("; ".join(problems))
+                    if validate is not None:
+                        validate(args)
+                except MalformedToolOutput as e:
+                    logger.warning(
+                        "[LLM] %s returned malformed output for '%s' (attempt %d/%d): %s",
+                        provider, name, attempt, MAX_ATTEMPTS_PER_PROVIDER, e,
+                    )
+                    errors.append(f"{provider}: malformed output ({e})")
+                    continue
+                logger.info("[LLM] %s (%s, small-tier) -> %s", provider, model_name, name)
+                return args
+        except FAILOVER_EXCEPTIONS as e:
+            logger.warning("[LLM] %s unavailable (%s) — failing over", provider, e)
+            errors.append(f"{provider}: {e}")
+            continue
     raise RuntimeError(f"{ALL_PROVIDERS_FAILED} for tool '{name}':\n" + "\n".join(errors))
+
+
+_QUESTIONS_MAX = QUESTIONS_TOOL["function"]["parameters"]["properties"]["questions"]["maxItems"]
 
 
 def generate_questions(state: OnboardingState) -> dict:
@@ -136,14 +163,19 @@ def generate_questions(state: OnboardingState) -> dict:
         QUESTIONS_TOOL,
         [
             SystemMessage(
-                "You are Venv's onboarding agent. Look at this graduate's "
-                "CV and propose a short, skippable set of follow-up "
-                "questions about whatever it doesn't cover well."
+                with_language(
+                    "You are Venv's onboarding agent. Look at this graduate's "
+                    "CV and propose a short, skippable set of follow-up "
+                    "questions about whatever it doesn't cover well."
+                )
             ),
             HumanMessage(f"CV:\n{state.get('cv_raw_text') or '(no CV provided)'}"),
         ],
     )
-    questions = [{"question": q, "answer": None} for q in args["questions"]]
+    # The schema says maxItems (4); not every provider's function-calling enforces
+    # array bounds strictly (found: DeepSeek returned 5). Truncating is graceful and
+    # free — no reason to spend a retry asking the model to count to 4.
+    questions = [{"question": q, "answer": None} for q in args["questions"][:_QUESTIONS_MAX]]
     return {"questions": questions, "stage": "qa"}
 
 
@@ -175,14 +207,24 @@ def suggest_track(state: OnboardingState) -> dict:
         )
         or "(no follow-up answers given — that's fine, work from the CV)"
     )
+    def _check_track(data: dict) -> None:
+        # An out-of-enum track has no safe truncation/default — must be retried.
+        # Without this, TrackEnum(result["suggested_track"]) in the router (an
+        # uncaught ValueError) would 500 on the graduate's very first onboarding
+        # screen for any model that drifts from the exact enum spelling.
+        if data.get("track") not in _TRACK_VALUES:
+            raise MalformedToolOutput(f"'track' was {data.get('track')!r}, not one of the known tracks")
+
     args = _forced_tool_call(
         small_model_chain(),
         TRACK_TOOL,
         [
             SystemMessage(
-                "Suggest which IT track best fits this graduate, using "
-                "their CV, follow-up answers, and anything they added "
-                "about themselves."
+                with_language(
+                    "Suggest which IT track best fits this graduate, using "
+                    "their CV, follow-up answers, and anything they added "
+                    "about themselves."
+                )
             ),
             HumanMessage(
                 f"CV:\n{state.get('cv_raw_text') or '(none)'}\n\n"
@@ -190,6 +232,7 @@ def suggest_track(state: OnboardingState) -> dict:
                 f"Self-description:\n{state.get('intro_text') or '(none)'}"
             ),
         ],
+        validate=_check_track,
     )
     return {
         "suggested_track": args["track"],
@@ -224,8 +267,10 @@ def suggest_agents(state: OnboardingState) -> dict:
         AGENTS_TOOL,
         [
             SystemMessage(
-                "Suggest which optional agents fit this graduate's track, "
-                "from the catalog given."
+                with_language(
+                    "Suggest which optional agents fit this graduate's track, "
+                    "from the catalog given."
+                )
             ),
             HumanMessage(f"Track: {state['approved_track']}\n\nCatalog:\n{catalog_text}"),
         ],
