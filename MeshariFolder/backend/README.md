@@ -20,6 +20,8 @@ pip install -r requirements.txt   # includes LangGraph/LangChain, pypdf, python-
 cp .env.example .env
 # .env already points at the Docker Postgres above — no edits needed.
 # Quick local check without Docker? Set DATABASE_URL=sqlite:///./dev.db instead.
+# The first start builds the schema by running the Alembic migrations
+# (see ../docs/MIGRATIONS.md) — there's no separate setup step.
 
 uvicorn app.main:app --reload
 ```
@@ -43,13 +45,20 @@ python smoke_test.py
 | `app/storage.py` | Local-disk storage for task attachments (`backend/uploads/`, gitignored) |
 | `app/agents/` | Manager, Mentor, HR, Meeting, the roundtable, and the LangGraph agents (see its own README) |
 | `app/routers/auth.py` | `POST /auth/register`, `POST /auth/login` |
-| `app/routers/users.py` | `GET /users/me`, `GET /users/me/agents`, `/employee-file`, `/reviews`, `/dashboard` |
-| `app/routers/onboarding.py` | The full onboarding flow: CV upload, Q&A, track, agent roster, reset |
+| `app/routers/users.py` | `GET /users/me`, `GET /users/me/agents`, `/employee-file`, `/reviews`, `/dashboard`, `POST /users/me/cv` (paste) and `/users/me/cv/file` (replace) |
+| `app/routers/onboarding.py` | The full onboarding flow: CV upload, Q&A, track, agent roster, resume, reset |
 | `app/routers/tasks.py` | Task board CRUD, multi-modal submission, attachment download, threaded messages |
 | `app/routers/projects.py` | `GET /projects/me`, `POST /projects/own` |
 | `app/routers/agents.py` | Endpoints that trigger Manager/Mentor/HR — Mentor's endpoint also runs the roundtable |
 | `app/routers/meeting.py` | `GET`/`POST /meeting/{agent}` — any agent on the graduate's actual team |
-| `smoke_test*.py` (14 files) | Full list + check counts in `docs/PROJECT_STATUS.md`'s "Running the smoke suite" |
+| `alembic/`, `alembic.ini` | Database migrations — the schema's version history (`docs/MIGRATIONS.md`) |
+| `app/agents/task_bank.py` | The Manager's project seeds and four-week arcs, per track (`docs/TASK_BANK.md`) |
+| `app/agents/tool_output.py` | Repairs/checks a model's tool output (JSON-string lists, missing fields) before agents use it (`docs/LLM_PROVIDER_FAILOVER.md`) |
+| `app/agents/rubric.py` | The Mentor's rubric: categories, anchors, the verdict rule and its enforcement (`docs/MENTOR_RUBRIC.md`) |
+| `app/language.py` | Per-request language (`X-Venv-Language`) so every agent answers in Arabic or English (`docs/AGENT_LANGUAGE.md`) |
+| `app/migrations.py` | Runs the migrations at startup; adopts pre-Alembic databases safely |
+| `e2e_real_llm.py` | Run once before a demo: drives the whole demo path with your REAL LLM keys and reports per-step results, provider usage and failovers (`python e2e_real_llm.py --help`) |
+| `smoke_test*.py` (26 files) | Full list + check counts in `docs/PROJECT_STATUS.md`'s "Running the smoke suite" |
 
 ## Schema notes for the rest of the team
 

@@ -94,3 +94,65 @@ automatically on the very next screen.
   would let `plan_week` ground subtasks in an actual existing codebase
   rather than a description of one — worth a look once real usage shows
   whether that's needed.
+
+---
+
+## Materials — added
+
+A one-line description gave the Manager very little to plan five weeks of real work
+from. `POST /projects/own` now also accepts, optionally:
+
+- `materials_text` — pasted notes;
+- `files` — up to `MAX_MATERIALS_FILES` (3) PDF/Word/text files.
+
+Both are combined (pasted notes first, then each file under its own filename) and
+capped at `task_bank.MAX_MATERIALS_CHARS` (6,000 characters — a few pages; the
+Manager is told the cap so it isn't surprised by a cut-off), stored as
+`Project.materials_text` (migration `0005`, nullable), and exposed on every project
+response only as `has_materials: bool` — the text itself is never sent back to the
+frontend.
+
+`manager.plan_week` includes the materials in its prompt (own project + materials
+present only) and is told to *ground subtasks in them, not invent details they
+already give*. With no materials — the common case for a graduate who just types a
+title and description — the prompt is byte-for-byte what it was before this feature:
+verified by the test that checks the block does not appear.
+
+File extraction reuses `agents/graph/cv_parsing.read_cv_upload` as-is (it was already
+a generic "turn an upload into clean text or a clean error" helper, not CV-specific
+despite the module name) — so a corrupt file is a 400, an oversized one a 413, not a
+500, exactly like every other upload path in the app.
+
+### Frontend
+
+The onboarding wizard's own-project step (Stage 2's 5th step) gained an optional
+textarea and a multi-file picker, shown only when "I have my own project" is chosen.
+English and Arabic.
+
+### What was verified
+
+`smoke_test_own_project_materials.py` (29 checks, mutation-checked): pasted text only,
+files only, both combined in order, no materials at all (unchanged behaviour), the
+file-count/size/combined-length caps, a corrupt file, that materials never leak into
+an API response beyond the boolean, that a Manager-authored project never has any, and
+— through the real endpoint with the model faked — exactly what `plan_week` is and is
+not shown. The two pre-existing own-project suites were updated for the new multipart
+request format (unrelated to this feature — the endpoint stopped accepting a JSON
+body). All 24 suites pass on SQLite and PostgreSQL 16 (migrations 0001-0005, up, down,
+up); frontend eslint clean, full `next build` passes, the built bundle contains the
+new strings in both languages.
+
+### Not covered
+
+- **Materials can only be given at creation**, before the first `assign-task` call —
+  same restriction as the rest of own-project. Adding materials to an
+  *already-active* own project (a small follow-up, mirroring `POST /users/me/cv/file`)
+  is not built.
+- **Not tested with real models.** The wiring is verified; whether a real Manager
+  visibly grounds its plan in the materials is not — try it with
+  `python e2e_real_llm.py` once own-project creation is scripted there, or by hand.
+- **This is the same shape Stage 3's company knowledge base will need** (documents ->
+  extracted text -> in the planning prompt), just without retrieval — the whole file's
+  text goes in, capped, rather than being chunked and searched. A straight-line
+  precedent for that later RAG work, not a replacement for it.
+

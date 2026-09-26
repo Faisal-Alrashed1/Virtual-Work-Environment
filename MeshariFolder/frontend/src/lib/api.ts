@@ -36,8 +36,19 @@ export class ApiError extends Error {
   }
 }
 
+/** The language the UI is showing right now. Sent with every request so the
+ * agents (Manager, Mentor, HR, meeting room, roundtable, onboarding) answer in
+ * the graduate's language — see docs/AGENT_LANGUAGE.md. Read from <html lang>,
+ * which the LocaleProvider keeps in sync, so it is always current and never
+ * out of step after a toggle. */
+function currentLanguage(): "ar" | "en" {
+  if (typeof document === "undefined") return "en";
+  return document.documentElement.getAttribute("lang") === "ar" ? "ar" : "en";
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
+  headers.set("X-Venv-Language", currentLanguage());
   if (
     !(options.body instanceof URLSearchParams) &&
     !(options.body instanceof FormData) &&
@@ -98,7 +109,10 @@ export type ApiAgentType =
   | "security_reviewer"
   | "data_reviewer"
   | "career_coach"
-  | "devops";
+  | "devops"
+  | "qa_engineer"
+  | "ux_reviewer"
+  | "technical_writer";
 export type ApiTaskStatus = "todo" | "in_progress" | "submitted" | "reviewed";
 export type ApiSenderType = "user" | "agent";
 
@@ -110,6 +124,9 @@ export interface UserApiOut {
   is_active: boolean;
   created_at: string;
   has_cv: boolean;
+  account_type: "student" | "company";
+  company_role: "admin" | "hr" | "tech_lead" | null;
+  organization_id: string | null;
 }
 
 export interface TaskMessageApiOut {
@@ -144,6 +161,15 @@ export interface TaskApiOut {
   completed_at: string | null;
   // null until both deadline and completed_at exist.
   is_late: boolean | null;
+  // The Mentor bounced the task back for changes and it hasn't been
+  // resubmitted yet (in_progress alone can't say), and how many times it has
+  // been bounced in total. See docs/NEEDS_CHANGES_VISIBLE.md.
+  needs_changes: boolean;
+  revision_count: number;
+  // The specialists' discussion of the latest review is still being written, in the
+  // background after the Mentor's review was returned — the thread keeps growing until
+  // this goes false. See docs/BACKGROUND_ROUNDTABLE.md.
+  roundtable_running: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -152,7 +178,7 @@ export interface TaskDetailApiOut extends TaskApiOut {
   messages: TaskMessageApiOut[];
 }
 
-export type ApiReviewKind = "task_review" | "week_progress" | "behavioral" | "skills_rollup";
+export type ApiReviewKind = "task_review" | "week_progress" | "behavioral" | "skills_rollup" | "career_checkin";
 
 export interface RubricCategoryApi {
   key: string;
@@ -189,6 +215,13 @@ export interface BehavioralMetricsApi {
   consistency_rating: "strong" | "adequate" | "needs_improvement";
 }
 
+/** The Career Coach's career check-in (docs/TEN_AGENTS.md) — its one
+ * dedicated action beyond ordinary chat. */
+export interface CareerCheckinMetricsApi {
+  resume_highlights: string[];
+  suggested_focus: string;
+}
+
 export interface ReviewApiOut {
   id: string;
   task_id: string | null;
@@ -203,6 +236,7 @@ export interface ReviewApiOut {
     | HrMetricsApi
     | WeekProgressMetricsApi
     | BehavioralMetricsApi
+    | CareerCheckinMetricsApi
     | null;
   created_at: string;
 }
@@ -229,6 +263,17 @@ export interface DashboardApiOut {
 export interface ChatMessageApiOut {
   id: string;
   agent_type: ApiAgentType;
+  sender_type: "user" | "agent";
+  content: string;
+  created_at: string;
+}
+
+/** A turn in the Team Room — agent_type is null for the graduate's own
+ * messages (unlike ChatMessageApiOut, where the thread is always with
+ * one fixed agent so it's never null). */
+export interface TeamMessageApiOut {
+  id: string;
+  agent_type: ApiAgentType | null;
   sender_type: "user" | "agent";
   content: string;
   created_at: string;
@@ -264,6 +309,9 @@ export interface ProjectApiOut {
   title: string;
   description: string;
   status: ApiProjectStatus;
+  // Whether real project materials (pasted notes and/or uploaded files) were
+  // given for this own project — never the text itself. See lib/projects.ts.
+  has_materials: boolean;
   created_at: string;
   updated_at: string;
   weeks: WeekApiOut[];
@@ -313,17 +361,166 @@ export interface OnboardingStateApiOut {
   suggested_track: ApiTrack | null;
 }
 
+/** GET /onboarding/resume — what the wizard needs to re-draw the step the
+ * graduate stopped on, read from what the server saved at each pause (no LLM
+ * call). resumable=false means "nothing to restore, start at the CV step".
+ * See docs/ONBOARDING_RESUME.md. */
+export interface OnboardingResumeApiOut {
+  onboarding_stage: ApiOnboardingStage;
+  resumable: boolean;
+  questions: string[];
+  intro_text: string | null;
+  suggested_track: ApiTrack | null;
+  reasoning: string | null;
+  suggested_agents: AgentCatalogApiOut[];
+}
+
 export interface ProjectOwnApiOut {
   id: string;
   title: string;
   description: string;
   status: ApiProjectStatus;
   source: "manager" | "own";
+  has_materials: boolean;
   created_at: string;
   updated_at: string;
 }
 
 // ---- API surface ----
+
+// ---- Stage 3: company accounts + RAG (docs/STAGE3_COMPANY_RAG.md) ----
+
+export interface OrganizationApiOut {
+  id: string;
+  name: string;
+  field: string | null;
+  join_code: string;
+}
+
+export interface JobTitleApiOut {
+  id: string;
+  title: string;
+  description: string | null;
+  created_at: string;
+  material_count: number;
+  chunk_count: number;
+}
+
+export interface KnowledgeMaterialApiOut {
+  id: string;
+  job_title_id: string;
+  filename: string | null;
+  chunk_count: number;
+  created_at: string;
+  preview: string;
+}
+
+export interface RAGChunkApiOut {
+  id: string;
+  material_id: string;
+  content: string;
+  score: number;
+}
+
+export interface RAGQueryResultApiOut {
+  query: string;
+  chunks: RAGChunkApiOut[];
+}
+
+export interface CompanyRegisterPayload {
+  email: string;
+  password: string;
+  full_name: string;
+  company_name?: string;
+  field?: string;
+  join_code?: string;
+  role?: "admin" | "hr" | "tech_lead";
+}
+
+export interface CompanyRegisterApiOut {
+  user: UserApiOut;
+  organization: OrganizationApiOut;
+}
+
+export interface CompanyProjectApiOut {
+  id: string;
+  job_title_id: string;
+  title: string;
+  description: string;
+  has_materials: boolean;
+  created_at: string;
+}
+
+export interface InvitationApiOut {
+  id: string;
+  job_title_id: string;
+  job_title: string;
+  company_project_id: string | null;
+  company_project_title: string | null;
+  invited_email: string;
+  status: "pending" | "accepted" | "declined";
+  email_sent: boolean;
+  created_at: string;
+  responded_at: string | null;
+}
+
+export interface InvitationDetailApiOut {
+  id: string;
+  organization_name: string;
+  job_title: string;
+  company_project_title: string | null;
+  status: "pending" | "accepted" | "declined";
+  created_at: string;
+  responded_at: string | null;
+  data_shared_notice: string;
+}
+
+export interface CompanyStudentApiOut {
+  invitation_id: string;
+  student_name: string;
+  student_email: string;
+  job_title: string;
+  company_project_title: string | null;
+  project_title: string | null;
+  project_status: "active" | "completed" | null;
+  current_week_number: number | null;
+  task_counts: Record<string, number>;
+}
+
+export interface CompanyTaskApiOut {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  github_link: string | null;
+  submission_text: string | null;
+  deadline: string | null;
+  submitted_at: string | null;
+  completed_at: string | null;
+}
+
+export interface CompanyReviewApiOut {
+  id: string;
+  agent_type: string;
+  kind: string;
+  content: string;
+  metrics_json: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface CompanyStudentWeekApiOut {
+  week_number: number;
+  status: "active" | "completed";
+  started_at: string;
+  target_end_at: string;
+  ended_at: string | null;
+  tasks: CompanyTaskApiOut[];
+  reviews: CompanyReviewApiOut[];
+}
+
+export interface CompanyStudentDetailApiOut extends CompanyStudentApiOut {
+  weeks: CompanyStudentWeekApiOut[];
+}
 
 export const api = {
   auth: {
@@ -341,12 +538,27 @@ export const api = {
 
   me: () => request<UserApiOut>("/users/me"),
 
+  /** The settings page's profile form — rename, change password, or
+   * both. See app/schemas.py's UserUpdate. */
+  updateMe: (payload: { full_name?: string; current_password?: string; new_password?: string }) =>
+    request<UserApiOut>("/users/me", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
   cv: {
     submit: (cvRawText: string) =>
       request<UserApiOut>("/users/me/cv", {
         method: "POST",
         body: JSON.stringify({ cv_raw_text: cvRawText }),
       }),
+    /** Replace the CV with a new file (PDF / Word / text) without touching
+     * onboarding, track, team or tasks. Refused (409) mid-onboarding. */
+    uploadFile: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return request<UserApiOut>("/users/me/cv/file", { method: "POST", body: form });
+    },
   },
 
   onboarding: {
@@ -359,6 +571,7 @@ export const api = {
      * graph and orientation screen. */
     myAgents: () => request<AgentCatalogApiOut[]>("/users/me/agents"),
     state: () => request<OnboardingStateApiOut>("/onboarding/state"),
+    resume: () => request<OnboardingResumeApiOut>("/onboarding/resume"),
     uploadCv: (file: File) => {
       const form = new FormData();
       form.append("file", file);
@@ -424,12 +637,26 @@ export const api = {
       request<TaskMessageApiOut>(`/agents/manager/reply/${taskId}`, {
         method: "POST",
       }),
+    /** Reply in a task's thread from whichever agent the graduate is
+     * addressing — Mentor (the default), Manager, or a technical roster
+     * agent (security_reviewer/data_reviewer/devops). See lib/tasks.ts's
+     * TASK_CHAT_AGENTS and docs/TASK_CHAT.md. */
+    taskChatReply: (taskId: string, agentType: ApiAgentType) =>
+      request<TaskMessageApiOut>(`/agents/task/${taskId}/reply`, {
+        method: "POST",
+        body: JSON.stringify({ agent_type: agentType }),
+      }),
     mentorReview: (taskId: string) =>
       request<ReviewApiOut>(`/agents/mentor/review/${taskId}`, {
         method: "POST",
       }),
     hrRollup: () =>
       request<ReviewApiOut>("/agents/hr/rollup", { method: "POST" }),
+    /** The Career Coach's one dedicated action beyond chat — a career
+     * check-in, saved as a Review the same way HR's rollup is. 403s if
+     * Career Coach isn't on the graduate's roster. */
+    careerCoachCheckin: () =>
+      request<ReviewApiOut>("/agents/career-coach/checkin", { method: "POST" }),
   },
 
   employeeFile: () => request<EmployeeFileApiOut>("/users/me/employee-file"),
@@ -444,11 +671,17 @@ export const api = {
     /** Stage 2: bring your own project instead of the Manager improvising
      * one. Only works before the first assign-task call — 400s if the
      * graduate already has an active project. */
-    createOwn: (title: string, description: string) =>
-      request<ProjectOwnApiOut>("/projects/own", {
-        method: "POST",
-        body: JSON.stringify({ title, description }),
-      }),
+    /** Materials are optional: pasted notes and/or up to a few files (PDF/Word/
+     * text) giving the Manager real material to plan around instead of a
+     * one-line description. See docs/STAGE2_OWN_PROJECT.md. */
+    createOwn: (title: string, description: string, materialsText?: string, files?: File[]) => {
+      const form = new FormData();
+      form.append("title", title);
+      form.append("description", description);
+      if (materialsText) form.append("materials_text", materialsText);
+      for (const file of files ?? []) form.append("files", file);
+      return request<ProjectOwnApiOut>("/projects/own", { method: "POST", body: form });
+    },
   },
 
   meeting: {
@@ -459,5 +692,87 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ content }),
       }),
+    /** The Team Room — a shared thread with the whole team at once,
+     * distinct from the 1:1 threads above. See lib/meeting.ts. */
+    team: {
+      history: () => request<TeamMessageApiOut[]>("/meeting/team"),
+      send: (content: string) =>
+        request<TeamMessageApiOut>("/meeting/team", {
+          method: "POST",
+          body: JSON.stringify({ content }),
+        }),
+    },
+  },
+
+  /** Stage 3's company side (docs/STAGE3_COMPANY_RAG.md) — see lib/company.ts. */
+  company: {
+    register: (payload: CompanyRegisterPayload) =>
+      request<CompanyRegisterApiOut>("/company/register", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    me: () => request<OrganizationApiOut>("/company/me"),
+    listJobTitles: () => request<JobTitleApiOut[]>("/company/job-titles"),
+    getJobTitle: (id: string) => request<JobTitleApiOut>(`/company/job-titles/${id}`),
+    createJobTitle: (title: string, description?: string) =>
+      request<JobTitleApiOut>("/company/job-titles", {
+        method: "POST",
+        body: JSON.stringify({ title, description: description || null }),
+      }),
+    listMaterials: (jobTitleId: string) =>
+      request<KnowledgeMaterialApiOut[]>(`/company/job-titles/${jobTitleId}/materials`),
+    uploadMaterial: (jobTitleId: string, text?: string, file?: File) => {
+      const form = new FormData();
+      if (text) form.append("text", text);
+      if (file) form.append("file", file);
+      return request<KnowledgeMaterialApiOut>(`/company/job-titles/${jobTitleId}/materials`, {
+        method: "POST",
+        body: form,
+      });
+    },
+    query: (jobTitleId: string, query: string, k = 5) =>
+      request<RAGQueryResultApiOut>(`/company/job-titles/${jobTitleId}/query`, {
+        method: "POST",
+        body: JSON.stringify({ query, k }),
+      }),
+    createProject: (jobTitleId: string, title: string, description: string, materialsText?: string, files?: File[]) => {
+      const form = new FormData();
+      form.append("title", title);
+      form.append("description", description);
+      if (materialsText) form.append("materials_text", materialsText);
+      for (const file of files ?? []) form.append("files", file);
+      return request<CompanyProjectApiOut>(`/company/job-titles/${jobTitleId}/projects`, {
+        method: "POST",
+        body: form,
+      });
+    },
+    listProjects: (jobTitleId: string) =>
+      request<CompanyProjectApiOut[]>(`/company/job-titles/${jobTitleId}/projects`),
+    createInvitation: (jobTitleId: string, invitedEmail: string, companyProjectId?: string) =>
+      request<InvitationApiOut>(`/company/job-titles/${jobTitleId}/invitations`, {
+        method: "POST",
+        body: JSON.stringify({ invited_email: invitedEmail, company_project_id: companyProjectId || null }),
+      }),
+    listInvitations: () => request<InvitationApiOut[]>("/company/invitations"),
+    listStudents: () => request<CompanyStudentApiOut[]>("/company/students"),
+    getStudent: (invitationId: string) =>
+      request<CompanyStudentDetailApiOut>(`/company/students/${invitationId}`),
+  },
+
+  /** The student's side of an invitation — see lib/invitations.ts. */
+  invitations: {
+    mine: () => request<InvitationDetailApiOut[]>("/invitations/mine"),
+    accept: (id: string, consent: boolean) =>
+      request<InvitationDetailApiOut>(`/invitations/${id}/accept`, {
+        method: "POST",
+        body: JSON.stringify({ consent }),
+      }),
+    decline: (id: string) =>
+      request<InvitationDetailApiOut>(`/invitations/${id}/decline`, { method: "POST" }),
+    /** Exactly what the company sees about this student — the literal
+     * same shape as api.company.getStudent, reused rather than
+     * redefined. See lib/invitations.ts's fetchMyVisibility. */
+    visibility: (id: string) =>
+      request<CompanyStudentDetailApiOut>(`/invitations/${id}/visibility`),
   },
 };

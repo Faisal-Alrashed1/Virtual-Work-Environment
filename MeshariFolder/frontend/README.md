@@ -71,10 +71,15 @@ live interactive schemas.
 See `DESIGN.md` before adding new colors, fonts, or components — the
 short version is: hairline borders and a faint grid instead of rounded
 cards and shadows, one accent color, monospace reserved for actual data
-(IDs, timestamps) rather than every label. **Dark-theme only right
-now** — light mode is queued up next, see `docs/PROJECT_STATUS.md`'s
-handoff section; expect this doc to need a real token-strategy pass, not
-a quick toggle, before that lands.
+(IDs, timestamps) rather than every label. Dark by default; light mode
+is a real second token set (not a quick toggle) via `data-theme` on
+`<html>` — `lib/theme.tsx` and `components/theme-toggle.tsx`. Arabic
+(with RTL) is also supported — `lib/i18n/` (`en.ts`/`ar.ts`,
+`locale.tsx`, `components/locale-toggle.tsx`). Both preferences persist
+in `localStorage` and are applied by an inline script in `layout.tsx`
+before first paint, to avoid a flash — if you touch either provider,
+read the comments there first, since getting the SSR/hydration boundary
+wrong here has bitten this project once already.
 
 ## Structure
 
@@ -87,15 +92,12 @@ src/components/       board/ (nodes, detail panel), dashboard/ (flow-section,
 src/lib/               api.ts (backend client, one file, every wire type),
                        auth-context.tsx, tasks.ts / reviews.ts / projects.ts /
                        team.ts / meeting.ts (domain types + fetch functions),
-                       agents.ts / agent-display.ts / tracks.ts (display
-                       metadata), attachments.ts, format.ts
+                       agents.ts / tracks.ts (display metadata),
+                       i18n/ (en.ts/ar.ts, locale.tsx), theme.tsx,
+                       attachments.ts, format.ts
 ```
 
 ## What's next
 
-Not a frontend-only list — see `docs/PROJECT_STATUS.md`'s "Handoff"
-section for the full picture, but the frontend-relevant pieces: reworking
-the onboarding/orientation experience further, Arabic language support
-(no i18n infrastructure exists here yet — this is a real architecture
-decision, not a drop-in library), and a light-mode theme built on top of
-the existing CSS-variable token system in `DESIGN.md`.
+See `docs/PROJECT_STATUS.md` for the current list — nothing
+frontend-specific queued up as of this writing.

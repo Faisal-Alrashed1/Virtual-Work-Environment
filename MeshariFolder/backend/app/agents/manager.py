@@ -19,9 +19,10 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.agents.language import LANGUAGE_RULE
+from app.agents.guardrails import MANAGER_DELEGATES_TASK_WORK, ROLE_BOUNDARY
 from app.agents.llm_client import call_agentic, call_with_tool
-from app.agents.submission_files import read_submitted_files
+from app.agents.task_bank import SUBTASK_PRINCIPLES, create_project_tool_for, seeds_for, seeds_prompt_block, week_arc_block
+from app.agents.tool_output import MalformedToolOutput
 from app.agents.tools import (
     CREATE_PROJECT_TOOL,
     PLAN_WEEK_TOOL,
@@ -65,6 +66,27 @@ def _cv_context(user: User) -> str:
     return "\n\n".join(parts) if parts else "No CV or history yet — this is their first task."
 
 
+def _check_project(data: dict) -> None:
+    for field in ("title", "description"):
+        if not isinstance(data.get(field), str) or not data[field].strip():
+            raise MalformedToolOutput(f"create_project returned no usable '{field}'")
+
+
+def _check_plan(data: dict) -> None:
+    """The plan must be exactly the shape plan_week() indexes into: five subtasks,
+    each an object with a title and a description. Anything else is retried by
+    llm_client instead of crashing (or worse, silently storing a broken plan)."""
+    subtasks = data["subtasks"]
+    if len(subtasks) < 5:
+        raise MalformedToolOutput(f"plan_week returned {len(subtasks)} subtasks, expected 5")
+    for i, item in enumerate(subtasks[:5], start=1):
+        if not isinstance(item, dict):
+            raise MalformedToolOutput(f"subtask {i} is a {type(item).__name__}, not an object")
+        for field in ("title", "description"):
+            if not isinstance(item.get(field), str) or not item[field].strip():
+                raise MalformedToolOutput(f"subtask {i} has no usable '{field}'")
+
+
 def create_project(db: Session, user: User) -> Project:
     """Called once per graduate, the first time weekly_cycle.get_next_task
     finds no active Project yet. Stage 2: a graduate can bring their own
@@ -73,27 +95,48 @@ def create_project(db: Session, user: User) -> Project:
     docs/STAGE2_OWN_PROJECT.md."""
     prompt = (
         f"{_cv_context(user)}\n\n"
+        f"{seeds_prompt_block(user.track)}\n\n"
         "Introduce this graduate to the main project they'll be working on "
         "throughout the program. Create it now via the create_project tool."
     )
     result = call_with_tool(
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
-        tools=[CREATE_PROJECT_TOOL],
+        tools=[create_project_tool_for(user.track)],
         force_tool="create_project",
+        validate=_check_project,
     )
     data = result["input"]
+    # Only ever store a seed that really is one of this track's — a made-up id
+    # would silently break the project's arc.
+    seed_id = data.get("seed_id") if data.get("seed_id") in {s.id for s in seeds_for(user.track)} else None
 
     project = Project(
         user_id=user.id,
         title=data["title"],
         description=data["description"],
         source=ProjectSource.MANAGER,
+        seed_id=seed_id,
     )
     db.add(project)
     db.commit()
     db.refresh(project)
     return project
+
+
+def _own_materials_block(project: Project) -> str:
+    """The graduate's own uploaded/pasted project materials (Project.materials_text),
+    for plan_week's prompt. Empty when there are none — a Manager-authored project
+    never has any, and an own project the graduate described with only a title and
+    description (no file, no notes) is planned exactly as before this feature."""
+    if project.source != ProjectSource.OWN or not project.materials_text:
+        return ""
+    return (
+        "OWN PROJECT MATERIALS the graduate provided (notes and/or uploaded files, "
+        f"possibly truncated):\n{project.materials_text}\n\n"
+        "Ground this week's subtasks in these actual materials wherever they say "
+        "something concrete — don't invent details these materials already give you."
+    )
 
 
 def plan_week(db: Session, user: User, project: Project) -> Week:
@@ -112,6 +155,9 @@ def plan_week(db: Session, user: User, project: Project) -> Week:
         f"Project: {project.title}\n{project.description}\n\n"
         f"{_cv_context(user)}\n\n"
         f"Prior weeks:\n{prior_weeks_text}\n\n"
+        + (f"{week_arc_block(project.seed_id, week_number)}\n\n" if project.seed_id else "")
+        + (f"{_own_materials_block(project)}\n\n" if _own_materials_block(project) else "")
+        + f"{SUBTASK_PRINCIPLES}\n\n"
         f"Plan week {week_number} now via the plan_week tool."
     )
     result = call_with_tool(
@@ -120,6 +166,7 @@ def plan_week(db: Session, user: User, project: Project) -> Week:
         tools=[PLAN_WEEK_TOOL],
         force_tool="plan_week",
         max_tokens=2000,
+        validate=_check_plan,
     )
     data = result["input"]
     subtasks = data["subtasks"]
@@ -240,37 +287,14 @@ def submit_week_progress(db: Session, user: User, week: Week, mentor_consult: st
     return review
 
 
-# Thread replies answer questions about a task rather than review it, and
-# happen on every message, so the Manager gets a smaller slice of each file
-# than the Mentor does. The GitHub link is passed as-is, not fetched: each
-# fetch spends GitHub's 60/hour unauthenticated limit.
-_FILE_CHARS_FOR_REPLIES = 1500
-
-
-def _submission_context(task: Task) -> str:
-    if not (task.github_link or task.submission_text or task.attachments):
-        return "Nothing has been submitted for this task yet."
-    parts = ["The graduate's current submission:"]
-    if task.github_link:
-        parts.append(f"GitHub link: {task.github_link}")
-    if task.submission_text:
-        parts.append(f"Their notes: {task.submission_text}")
-    readable, unreadable = read_submitted_files(task, max_chars_per_file=_FILE_CHARS_FOR_REPLIES)
-    for filename, text in readable:
-        parts.append(f"--- {filename} ---\n{text}")
-    if unreadable:
-        parts.append(
-            "Also attached, but not readable here (images, archives, "
-            "binaries): " + ", ".join(unreadable)
-        )
-    return "\n".join(parts)
-
-
 def respond_in_thread(db: Session, task: Task, user: User) -> TaskMessage:
     """Reads the task's thread and posts a reply. Called after the graduate
-    posts a message via POST /tasks/{id}/messages. Sees the current
-    submission too (docs/TEAM_CHANGES.md #3) — before, it didn't know what
-    had been submitted at all, not even the file names."""
+    posts a message via POST /tasks/{id}/messages, when they're addressing
+    the Manager specifically rather than the Mentor (the default in-task
+    agent — see agents/task_chat.py and docs/TASK_CHAT.md). The Manager's
+    own job in a task thread is narrow (big-picture only) and its prompt
+    says so: MANAGER_DELEGATES_TASK_WORK steers hands-on task help back to
+    the Mentor instead of answering it here."""
     history = [
         {
             "role": "assistant" if m.sender_type == SenderType.AGENT else "user",
@@ -281,9 +305,9 @@ def respond_in_thread(db: Session, task: Task, user: User) -> TaskMessage:
     system = (
         SYSTEM_PROMPT
         + f"\n\nCurrent task: {task.title} — {task.description}\n"
-        + f"Status: {task.status.value}.\n{_cv_context(user)}\n\n"
-        + _submission_context(task)
-        + LANGUAGE_RULE
+        + f"Status: {task.status.value}.\n{_cv_context(user)}"
+        + MANAGER_DELEGATES_TASK_WORK
+        + ROLE_BOUNDARY
     )
     reply = call_agentic(
         system=system,

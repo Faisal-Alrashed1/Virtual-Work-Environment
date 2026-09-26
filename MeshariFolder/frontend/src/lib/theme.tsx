@@ -16,17 +16,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function readAppliedTheme(): Theme {
   if (typeof document === "undefined") return "dark";
-  // Same rule as the anti-flash script: stored choice, else the OS
-  // preference. Not <html data-theme> — the effect below sets that from
-  // state, which is still "dark" on the first mount (twice under dev
-  // StrictMode), so re-reading it lost a saved "light" on reload.
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored === "light" || stored === "dark") return stored;
-  } catch {
-    // storage unavailable — fall through to the OS preference
-  }
-  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -51,22 +41,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Keep <html data-theme> (which every CSS variable in globals.css keys
-  // off) in sync with React state.
+  // off) and localStorage (which the next page load's inline script
+  // reads) in sync with React state after every toggle.
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
+    window.localStorage.setItem(STORAGE_KEY, theme);
   }, [theme]);
 
-  // Persist only on an explicit toggle (read by the next page load's inline
-  // script). Persisting from the effect above also saved the initial
-  // "dark" on every load, overwriting a stored "light".
   function toggleTheme() {
-    const next: Theme = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      // storage unavailable — the choice just won't survive a reload
-    }
+    setTheme((t) => (t === "dark" ? "light" : "dark"));
   }
 
   return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;

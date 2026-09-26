@@ -4,7 +4,8 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import type { Task } from "@/lib/tasks";
 import type { Week } from "@/lib/projects";
-import { useLocale, useStatusLabels, useRelativeTime } from "@/lib/i18n/locale";
+import { timeUntil } from "@/lib/format";
+import { useLocale, useStatusLabels } from "@/lib/i18n/locale";
 
 interface FocusHeroProps {
   /** The task the graduate should act on now: the one open task in the
@@ -18,7 +19,6 @@ interface FocusHeroProps {
 
 export function FocusHero({ task, week, hasProject }: FocusHeroProps) {
   const { t } = useLocale();
-  const { timeUntil } = useRelativeTime();
   const statusLabels = useStatusLabels();
 
   return (
@@ -94,10 +94,10 @@ export function FocusHero({ task, week, hasProject }: FocusHeroProps) {
             <div className="flex items-center gap-2">
               <span
                 className="h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: "var(--agent-manager)" }}
+                style={{ backgroundColor: task.needsChanges ? "var(--danger)" : "var(--agent-manager)" }}
               />
-              <span className="text-xs text-text-secondary">
-                {statusLabels[task.status]}
+              <span className={`text-xs ${task.needsChanges ? "text-danger" : "text-text-secondary"}`}>
+                {task.needsChanges ? statusLabels.needs_changes : statusLabels[task.status]}
               </span>
             </div>
             {task.deadline && (

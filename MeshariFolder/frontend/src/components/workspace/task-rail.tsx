@@ -1,7 +1,8 @@
 "use client";
 
 import { STATUS_ORDER, type Task, type TaskStatus } from "@/lib/tasks";
-import { useLocale, useStatusLabels, useRelativeTime } from "@/lib/i18n/locale";
+import { timeUntil } from "@/lib/format";
+import { useLocale, useStatusLabels } from "@/lib/i18n/locale";
 
 interface TaskRailProps {
   tasks: Task[];
@@ -26,7 +27,6 @@ export function TaskRail({
   assigning,
 }: TaskRailProps) {
   const { t } = useLocale();
-  const { timeUntil } = useRelativeTime();
   const statusLabels = useStatusLabels();
   const grouped: Record<TaskStatus, Task[]> = {
     todo: [],
@@ -80,12 +80,21 @@ export function TaskRail({
                       <div className="flex items-center gap-2">
                         <span
                           className="h-1.5 w-1.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: STATUS_DOT[task.status] }}
+                          style={{
+                            backgroundColor: task.needsChanges ? "var(--danger)" : STATUS_DOT[task.status],
+                          }}
                         />
                         <span className="line-clamp-1 text-sm text-text-primary">
                           {task.title}
                         </span>
                       </div>
+                      {task.needsChanges && (
+                        <div className="ps-3.5">
+                          <span className="rounded border border-danger px-1.5 py-0.5 font-mono text-[10px] text-danger">
+                            {statusLabels.needs_changes} · {t("taskRail.revision", { n: task.revisionCount })}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 ps-3.5">
                         <span dir="ltr" className="font-mono text-[10px] text-text-muted">
                           {task.createdByAgent}

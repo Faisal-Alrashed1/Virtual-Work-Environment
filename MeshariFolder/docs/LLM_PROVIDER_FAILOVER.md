@@ -68,9 +68,6 @@ than uniformly.
    keeping only providers that have a key set.
 2. It calls the first provider in that chain.
 3. If that call fails with an availability-related error (auth error, rate limit, no credit, connection error), it automatically retries with the next provider in the chain.
-   If the provider answers but skips the forced tool call (plain text, or
-   broken JSON arguments — a `ToolCallError`), it's retried once on the
-   same provider, then fails over the same way. See `docs/TEAM_CHANGES.md` #2.
 4. If all configured providers fail, the API returns a clear `503` error instead of crashing.
 5. If no provider has a key configured at all, the API returns a `503` explaining that `LLM_PROVIDER_PRIORITY` (or the tier-specific override) / API keys need to be set.
 
@@ -116,3 +113,49 @@ first, seeing it swallowed, then fixing it this way.
 - No code changes are required to add a new provider's *model choice* - just add its key and put it in the relevant priority variable(s).
 - Adding a brand-new provider (beyond the four above) requires adding its settings in `config.py` and its client setup in `llm_client.py`.
 - **A real bug caught while adding tier-aware routing**: `call_agentic` and `graph/models.py`'s `_model_chain` both already accepted a `tier` argument, but neither actually passed it into `resolve_provider_chain()` — so tier was silently only ever affecting the model *name* within a provider, never which providers got tried at all. Fixed as part of this same change; see `smoke_test_llm_provider_routing.py` for the regression test that would have caught it.
+
+## Malformed tool output: repair, retry, fail over
+
+Failover above handles a provider being *down*. This handles a provider being *up but
+wrong* - which only real models do, and no mocked test can show.
+
+**What happened.** Running the real models (`e2e_real_llm.py`), Claude returned the
+Manager's `subtasks` as a JSON *string* instead of a list. `len()` of that string is
+large, so the "at least 5 subtasks" check passed; the loop then iterated single
+characters and `s["title"]` raised `TypeError: string indices must be integers`. A
+random 500 in the middle of "Ask manager", about one run in a few.
+
+**What `llm_client.call_with_tool` does now** (code in `agents/tool_output.py`):
+
+1. **Repair** what can be repaired with certainty: a JSON string where the schema wants
+   a list/object (the bug above), a number sent as a string (`"4"` -> `4`; `"4.5"` is
+   *not* truncated to an integer). Every repair is logged, so you can see how often a
+   model does it.
+2. **Check** what would certainly crash the caller: a required field missing or null, a
+   list that isn't a list, a list shorter than the schema's `minItems`, no tool call at
+   all, arguments that aren't valid JSON (this last one used to be an unhandled crash on
+   DeepSeek/Qwen/OpenAI).
+3. **Retry** the same provider once (a model's answer is nondeterministic - it usually
+   comes right on the second try), then **fail over** to the next provider. A provider
+   that is *down* still fails over immediately; it is never retried.
+4. Only when every provider has failed: a clean `503` whose message says the answers
+   were malformed, per provider - never a 500.
+
+The Manager also passes its own `validate` hook: a plan must be five objects, each with a
+title and a description; a project needs a title and description.
+
+**Deliberately not checked:** what is *inside* list items in general (only the Manager
+opts in). Item shapes differ between providers, and a stricter generic check could reject
+output that works today - a regression we can't test without keys.
+
+`e2e_real_llm.py` now prints a "REPAIRED" and a "MALFORMED" section, so a real run tells
+you how flaky each provider is on your schemas.
+
+**Verified:** `smoke_test_llm_tool_output.py` (48 checks) - the repair/check functions,
+every retry/failover path for Anthropic and OpenAI-compatible providers, and the real
+failure through the real endpoint. It fails on the old code with the exact original
+`TypeError`.
+
+**Not covered:** the retry adds latency when a model is flaky (one extra call); and
+`call_agentic` (chat replies) has no schema to repair, so it is unchanged.
+

@@ -5,7 +5,8 @@ import Link from "next/link";
 import type { AgentId } from "@/lib/agents";
 import type { ExtraAgent } from "@/lib/team";
 import type { Week } from "@/lib/projects";
-import { localizeExtraAgent, useAgents, useExtraAgentText, useLocale, useRelativeTime } from "@/lib/i18n/locale";
+import { timeUntil } from "@/lib/format";
+import { useAgents, useLocale } from "@/lib/i18n/locale";
 
 // Reserved sentinels are "employee-file" and "week"; anything else is
 // either one of the three default agent ids or an extra agent's catalog
@@ -39,9 +40,7 @@ export function DetailPanel({
   onClose,
 }: DetailPanelProps) {
   const { t, dir } = useLocale();
-  const { timeUntil } = useRelativeTime();
   const agents = useAgents();
-  const extraText = useExtraAgentText();
   // framer-motion's x transform is a physical offset (translateX), not
   // direction-aware like the `end-0` position below — so the slide-in
   // origin has to be flipped explicitly, or the panel would animate in
@@ -67,7 +66,7 @@ export function DetailPanel({
   const meta = isDefaultAgent ? agents[selection as AgentId] : null;
   const customAgent =
     !isReserved && !isDefaultAgent && selection
-      ? (extraAgents.map((a) => localizeExtraAgent(a, extraText)).find((a) => a.id === selection) ?? null)
+      ? (extraAgents.find((a) => a.id === selection) ?? null)
       : null;
   // Mentor is the one card whose link depends on real data: point at the
   // graduate's own reviewed task once they have one, otherwise fall back
@@ -268,7 +267,7 @@ export function DetailPanel({
                       {hasCv ? t("detailPanel.cvOnFile") : t("detailPanel.cvNotOnFile")}
                     </p>
                     <Link
-                      href="/onboarding/cv"
+                      href={hasCv ? "/profile/cv" : "/onboarding/cv"}
                       className="mt-3 inline-block rounded border border-border px-3 py-1.5 text-xs text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary"
                     >
                       {hasCv ? t("detailPanel.updateCv") : t("detailPanel.addCv")}

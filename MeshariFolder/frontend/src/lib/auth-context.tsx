@@ -15,12 +15,15 @@ export interface AuthUser {
   email: string;
   fullName: string;
   hasCv: boolean;
+  accountType: "student" | "company";
+  companyRole: "admin" | "hr" | "tech_lead" | null;
+  organizationId: string | null;
 }
 
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<AuthUser>;
   register: (email: string, password: string, fullName: string) => Promise<void>;
   logout: () => void;
   /** Clears the session in place, without redirecting — for the /logout
@@ -38,8 +41,19 @@ function toAuthUser(u: {
   email: string;
   full_name: string;
   has_cv: boolean;
+  account_type: "student" | "company";
+  company_role: "admin" | "hr" | "tech_lead" | null;
+  organization_id: string | null;
 }): AuthUser {
-  return { id: u.id, email: u.email, fullName: u.full_name, hasCv: u.has_cv };
+  return {
+    id: u.id,
+    email: u.email,
+    fullName: u.full_name,
+    hasCv: u.has_cv,
+    accountType: u.account_type,
+    companyRole: u.company_role,
+    organizationId: u.organization_id,
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -67,7 +81,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { access_token } = await api.auth.login(email, password);
     setToken(access_token);
     const me = await api.me();
-    setUser(toAuthUser(me));
+    const authUser = toAuthUser(me);
+    setUser(authUser);
+    return authUser;
   }
 
   async function register(email: string, password: string, fullName: string) {

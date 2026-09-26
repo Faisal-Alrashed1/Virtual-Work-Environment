@@ -1,12 +1,20 @@
 """
-Minimal GitHub REST client — just enough context for the agents to review
-real submitted work. Works with no token for public repos, but the
-unauthenticated API allows only 60 requests/hour per IP, and one review
-with a GitHub link uses several (Mentor + Security/Data Reviewers) — a
-handful of submissions an hour used it up in testing. Set GITHUB_TOKEN in
-backend/.env (a personal access token; read-only public access is enough)
-to raise that to 5,000/hour, and to let the agents read private repos the
-token can see.
+Minimal GitHub REST client — just enough context for the Mentor agent to review
+real submitted work. Stage 1 only accepts public repo links (see
+Project-Summary.md's "Code submission: GitHub link (public repos)"), so no token
+is REQUIRED.
+
+But each review costs three requests (repo info, file tree, README), and the
+anonymous API allows 60 per hour per IP — about 20 reviews an hour, shared by
+everyone testing or demoing from one network. A full `e2e_real_llm.py --full-week`
+run alone uses ~45. So set GITHUB_TOKEN in backend/.env (a token with no scopes
+is enough for public repos) and it is sent as a Bearer header: 5,000 per hour.
+When the limit IS hit the review carries on from the task and link alone, and the
+Mentor is told why (so it doesn't blame the graduate for a repo it couldn't read).
+
+What the Mentor is shown: the repo description, the first 25 file paths, and the
+first 2,000 characters of the README — NOT the code. Anything a graduate wants
+judged has to be visible there (docs/TASK_BANK.md).
 """
 import base64
 import re
@@ -18,18 +26,24 @@ from app.config import settings
 _LINK_RE = re.compile(r"github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$")
 
 
-def _client() -> httpx.Client:
-    headers = {"Accept": "application/vnd.github+json"}
-    if settings.github_token:
-        headers["Authorization"] = f"Bearer {settings.github_token}"
-    return httpx.Client(timeout=10.0, headers=headers)
-
-
 def parse_owner_repo(github_link: str) -> tuple[str, str]:
     match = _LINK_RE.search(github_link.strip())
     if not match:
         raise ValueError(f"Could not parse a GitHub owner/repo from: {github_link}")
     return match.group(1), match.group(2)
+
+
+def _is_rate_limited(response) -> bool:
+    """GitHub answers a rate-limited request with 403 (or 429) and either
+    X-RateLimit-Remaining: 0 or a message saying so."""
+    if response.status_code not in (403, 429):
+        return False
+    if response.headers.get("X-RateLimit-Remaining") == "0":
+        return True
+    try:
+        return "rate limit" in str(response.json().get("message", "")).lower()
+    except Exception:  # noqa: BLE001 - body wasn't JSON
+        return False
 
 
 def fetch_repo_context(github_link: str, max_files: int = 25) -> str:
@@ -41,13 +55,24 @@ def fetch_repo_context(github_link: str, max_files: int = 25) -> str:
     owner, repo = parse_owner_repo(github_link)
     parts = [f"Repo: {owner}/{repo}"]
 
-    with _client() as client:
+    headers = {"Accept": "application/vnd.github+json"}
+    if settings.github_token:
+        headers["Authorization"] = f"Bearer {settings.github_token}"
+
+    with httpx.Client(timeout=10.0, headers=headers) as client:
         meta = client.get(f"https://api.github.com/repos/{owner}/{repo}")
         if meta.status_code != 200:
-            parts.append(
-                f"(Could not fetch repo metadata — status {meta.status_code}. "
-                "Review based on the task and link alone.)"
-            )
+            if _is_rate_limited(meta):
+                parts.append(
+                    f"(GitHub's request limit was reached — status {meta.status_code} — so the repository could "
+                    "not be read. This is not the graduate's fault. Set GITHUB_TOKEN in backend/.env to raise "
+                    "the limit. Review based on the task and link alone.)"
+                )
+            else:
+                parts.append(
+                    f"(Could not fetch repo metadata — status {meta.status_code}. "
+                    "Review based on the task and link alone.)"
+                )
             return "\n".join(parts)
 
         data = meta.json()
@@ -77,58 +102,3 @@ def fetch_repo_context(github_link: str, max_files: int = 25) -> str:
             parts.append(f"README (truncated):\n{content[:2000]}")
 
     return "\n".join(parts)
-
-
-# ---------------------------------------------------------------------------
-# Added for the Security Reviewer / Data Reviewer specialists (they need
-# real file content, not just names, to ground a structured finding in
-# what's actually in the repo). Deliberately separate from
-# fetch_repo_context above rather than refactored into it — that function
-# is already relied on by the Mentor's review and every existing smoke
-# test; these are new, additive entry points so nothing about its
-# behavior changes for the callers that already use it.
-# ---------------------------------------------------------------------------
-
-def list_repo_paths(owner: str, repo: str) -> list[str] | None:
-    """Every blob (file) path in the repo's default branch — lets a
-    specialist search for files of interest (e.g. '*.ipynb', a committed
-    '.env') without knowing exact names ahead of time. None (not []) if
-    the repo/tree couldn't be fetched — a private repo, a typo, or
-    GitHub's unauthenticated rate limit (60/hour) — so callers can tell
-    "GitHub didn't answer" apart from "the repo has no such files"."""
-    with _client() as client:
-        meta = client.get(f"https://api.github.com/repos/{owner}/{repo}")
-        if meta.status_code != 200:
-            return None
-        default_branch = meta.json().get("default_branch", "main")
-
-        tree = client.get(
-            f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}",
-            params={"recursive": "1"},
-        )
-        if tree.status_code != 200:
-            return None
-        return [
-            item["path"]
-            for item in tree.json().get("tree", [])
-            if item["type"] == "blob"
-        ]
-
-
-def fetch_file_content(owner: str, repo: str, path: str) -> str | None:
-    """Raw text content of one file at the repo's default branch via the
-    Contents API, or None if it doesn't exist / isn't fetchable as text
-    (e.g. a binary file, or the request itself failing) — always
-    best-effort, never raises, since a candidate filename not existing is
-    the expected common case, not an error."""
-    with _client() as client:
-        resp = client.get(f"https://api.github.com/repos/{owner}/{repo}/contents/{path}")
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        if data.get("encoding") != "base64" or "content" not in data:
-            return None
-        try:
-            return base64.b64decode(data["content"]).decode("utf-8", errors="ignore")
-        except (ValueError, TypeError):
-            return None

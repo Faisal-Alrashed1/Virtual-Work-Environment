@@ -31,6 +31,9 @@ export interface Project {
   title: string;
   description: string;
   status: ProjectStatus;
+  /** Real material (pasted notes and/or files) was given for an own project —
+   * never the text itself. Always false for a Manager-authored project. */
+  hasMaterials: boolean;
   weeks: Week[];
 }
 
@@ -56,6 +59,7 @@ function toProject(p: ProjectApiOut): Project {
     title: p.title,
     description: p.description,
     status: p.status,
+    hasMaterials: p.has_materials,
     weeks: p.weeks.map(toWeek),
   };
 }
@@ -84,6 +88,11 @@ export function currentWeek(project: Project): Week | null {
 
 /** Stage 2: bring your own project instead of the Manager improvising
  * one. Only works before the first task — see api.projects.createOwn. */
-export async function createOwnProject(title: string, description: string): Promise<void> {
-  await api.projects.createOwn(title, description);
+export async function createOwnProject(
+  title: string,
+  description: string,
+  materialsText?: string,
+  files?: File[]
+): Promise<void> {
+  await api.projects.createOwn(title, description, materialsText, files);
 }

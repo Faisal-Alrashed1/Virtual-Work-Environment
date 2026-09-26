@@ -38,10 +38,9 @@ plain Python.
   the Mentor first (`mentor_consult` param, see below); and, in the
   roundtable, reads the whole team's discussion and posts a synthesis.
 - **Mentor** (`mentor.py`) — reads a submission (GitHub link via
-  `github_client.py`, free text, image attachments as real vision
-  content blocks, and the actual content of uploaded code/text/notebook
-  files via `submission_files.py` — any combination; see
-  `docs/TEAM_CHANGES.md` #1), writes a structured `Review` (`kind="task_review"`,
+  `github_client.py`, free text, and/or image attachments as real vision
+  content blocks — any combination, not github_link-specifically since
+  Stage 2), writes a structured `Review` (`kind="task_review"`,
   `metrics_json` = verdict + rubric + inline comments — `tools.py`'s
   `SUBMIT_REVIEW_TOOL`), posts a summary message, and moves the task to
   `reviewed` on `approved` or back to `in_progress` on `needs_changes`
@@ -82,35 +81,6 @@ plain Python.
   (not a per-task code review; stays meeting-room-only). One bounded pass,
   deterministic speaker order, best-effort per turn. See
   `docs/STAGE2_ROUNDTABLE.md`.
-  - **Security Reviewer** (`security_reviewer.py`) and **Data Reviewer**
-    (`data_reviewer.py`) are upgraded from a free-text persona comment to
-    a real reviewer each: their own system prompt, the actual content of
-    uploaded files (read via `submission_files.py`) plus real repo content
-    fetched via `github_client.py` (dependency/config files for
-    Security; notebook code cells for Data), a deterministic code-level
-    check ahead of the LLM call (a committed `.env` for Security; no
-    visible eval/test file for Data — same "compute the fact in code,
-    let the LLM narrate it" pattern as `hr.py`'s `_active_days`), and
-    structured output (`tools.SUBMIT_SECURITY_REVIEW_TOOL` /
-    `SUBMIT_DATA_REVIEW_TOOL`: verdict/risk_level/findings, not a
-    paragraph) stored as a `Review` with `kind=SPECIALIST_REVIEW`,
-    including `reviewed_files`/`unreadable_files` so every verdict shows
-    what it was based on. If nothing readable was submitted (notes only,
-    or only a zip/image), no LLM call is made and the verdict is
-    `not_reviewed` with a message telling the graduate what to upload —
-    never a guessed "clear". Before the LLM call, `static_checks.py` runs
-    rule-based checks over the same content (hardcoded secrets for
-    Security; preprocessing fit before the split / scoring on training
-    data for Data). A match is always stored as a finding (marked
-    `"source": "static_check"`, secret values masked) and leads the
-    thread message, even if the model missed it — in live testing the
-    small model caught an SQL injection but missed two hardcoded
-    secrets beside it. Both
-    still take `discussion_so_far` and stay part of the actual roundtable
-    conversation — the structured output is in addition to, not instead
-    of, being a real teammate in the discussion. DevOps is unchanged
-    (still the original free-text pass) — only these two were in scope
-    for this upgrade.
 
 ## graph/ — the LangGraph agents
 
@@ -145,12 +115,6 @@ agents/
 ├── mentor.py          # review_task — link/text/images, any combination
 ├── hr.py              # run_rollup, run_behavioral_review
 ├── meeting.py         # send_message, get_history, PERSONA, is_on_users_team
-├── security_reviewer.py # review_task — real repo/dependency analysis, structured findings
-├── data_reviewer.py     # review_task — real notebook analysis, structured findings
-├── submission_files.py  # reads uploaded attachments' content (text/code/notebooks/PDF/docx/zip) —
-│                         #   shared by Mentor/Security/Data and the Manager's thread replies
-├── static_checks.py     # rule-based checks run before the LLM (hardcoded secrets,
-│                         #   data leakage) — a match is always kept in the findings
 ├── co_reviewers.py     # the simpler parallel fallback (see roundtable.py)
 ├── roundtable.py       # the real thing — sequential discussion + Manager synthesis
 ├── weekly_cycle.py     # get_next_task — the Project/Week/subtask/cascade state machine

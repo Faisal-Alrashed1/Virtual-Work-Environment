@@ -37,11 +37,15 @@ r = client.post("/auth/login", data={"username": "agent-test@example.com", "pass
 token = r.json()["access_token"]
 headers = {"Authorization": f"Bearer {token}"}
 
-r = client.post(
-    "/users/me/cv",
-    json={"cv_raw_text": "Built two React apps, comfortable with Python, new to testing."},
-    headers=headers,
-)
+with patch(
+    "app.agents.graph.cv_parsing.call_with_tool",
+    return_value={"tool_name": "classify_document", "input": {"is_cv": True, "reason": ""}},
+):
+    r = client.post(
+        "/users/me/cv",
+        json={"cv_raw_text": "Built two React apps, comfortable with Python, new to testing."},
+        headers=headers,
+    )
 check("submit cv", r.status_code == 200)
 
 # --- Manager assigns the first task: this now bootstraps a Project + Week
