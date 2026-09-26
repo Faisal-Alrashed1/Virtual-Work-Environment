@@ -20,7 +20,13 @@ from langgraph.types import interrupt
 
 from app.agents.graph.models import small_model_chain
 from app.agents.graph.state import OnboardingState
-from app.agents.llm_client import ALL_PROVIDERS_FAILED, FAILOVER_EXCEPTIONS, logger
+from app.agents.llm_client import (
+    ALL_PROVIDERS_FAILED,
+    FAILOVER_EXCEPTIONS,
+    TOOL_CALL_ATTEMPTS,
+    ToolCallError,
+    logger,
+)
 from app.models import TrackEnum
 
 QUESTIONS_TOOL = {
@@ -92,25 +98,35 @@ AGENTS_TOOL = {
 
 def _forced_tool_call(models: list[tuple[str, BaseChatModel]], tool: dict, messages: list) -> dict:
     """Tries each (provider, model) pair in the given chain, in order,
-    binding the tool with tool_choice forced to it. Falls over to the next
-    provider on an availability-type error; raises once the whole chain is
-    exhausted."""
+    binding the tool with tool_choice forced to it. A model that answers
+    without calling the tool is retried once, then failed over — same
+    policy as llm_client._run_chain (see ToolCallError). An availability
+    error fails over immediately. Raises ALL_PROVIDERS_FAILED once the
+    whole chain is exhausted, which main.py returns as a clean 503."""
     name = tool["function"]["name"]
     errors = []
     for provider, model in models:
         model_name = getattr(model, "model", None) or getattr(model, "model_name", None) or "?"
-        try:
-            bound = model.bind_tools([tool], tool_choice=name)
-            response = bound.invoke(messages)
-            for call in response.tool_calls:
-                if call["name"] == name:
-                    logger.info("[LLM] %s (%s, small-tier) -> %s", provider, model_name, name)
-                    return call["args"]
-            raise RuntimeError(f"Model did not call '{name}' as expected.")
-        except FAILOVER_EXCEPTIONS as e:
-            logger.warning("[LLM] %s unavailable (%s) — failing over", provider, e)
-            errors.append(f"{provider}: {e}")
-            continue
+        for attempt_no in range(1, TOOL_CALL_ATTEMPTS + 1):
+            try:
+                bound = model.bind_tools([tool], tool_choice=name)
+                response = bound.invoke(messages)
+                for call in response.tool_calls:
+                    if call["name"] == name:
+                        logger.info("[LLM] %s (%s, small-tier) -> %s", provider, model_name, name)
+                        return call["args"]
+                raise ToolCallError(f"model answered without calling '{name}'")
+            except ToolCallError as e:
+                logger.warning(
+                    "[LLM] %s gave an invalid '%s' call (attempt %d/%d): %s",
+                    provider, name, attempt_no, TOOL_CALL_ATTEMPTS, e,
+                )
+                if attempt_no == TOOL_CALL_ATTEMPTS:
+                    errors.append(f"{provider}: {e}")
+            except FAILOVER_EXCEPTIONS as e:
+                logger.warning("[LLM] %s unavailable (%s) — failing over", provider, e)
+                errors.append(f"{provider}: {e}")
+                break
     raise RuntimeError(f"{ALL_PROVIDERS_FAILED} for tool '{name}':\n" + "\n".join(errors))
 
 

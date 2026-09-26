@@ -4,8 +4,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import type { Task } from "@/lib/tasks";
 import type { Week } from "@/lib/projects";
-import { timeUntil } from "@/lib/format";
-import { useLocale, useStatusLabels } from "@/lib/i18n/locale";
+import { useLocale, useStatusLabels, useRelativeTime } from "@/lib/i18n/locale";
 
 interface FocusHeroProps {
   /** The task the graduate should act on now: the one open task in the
@@ -19,6 +18,7 @@ interface FocusHeroProps {
 
 export function FocusHero({ task, week, hasProject }: FocusHeroProps) {
   const { t } = useLocale();
+  const { timeUntil } = useRelativeTime();
   const statusLabels = useStatusLabels();
 
   return (

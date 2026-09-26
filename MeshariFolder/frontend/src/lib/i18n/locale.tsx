@@ -6,6 +6,7 @@ import en from "./en";
 import ar from "./ar";
 import type { Dictionary } from "./en";
 import { AGENT_COLOR_VAR, type AgentId, type AgentMeta } from "@/lib/agents";
+import { timeAgo, timeUntil, type RelativeTimeLabels } from "@/lib/format";
 import { STATUS_ORDER, type TaskStatus } from "@/lib/tasks";
 import { SELECTABLE_ONLY_TRACKS, TRACK_ORDER } from "@/lib/tracks";
 import type { ApiTrack } from "@/lib/api";
@@ -72,7 +73,18 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
  * visitor. See ThemeProvider's identical fix for the full reasoning. */
 function readAppliedLocale(): Locale {
   if (typeof document === "undefined") return "en";
-  return document.documentElement.getAttribute("lang") === "ar" ? "ar" : "en";
+  // The stored choice is the source of truth, same rule as the anti-flash
+  // script. Not <html lang>: the effect below sets that from state, and on
+  // the first mount (twice under dev StrictMode) state is still "en", so
+  // re-reading the attribute picked the reset value and Arabic was lost on
+  // every reload.
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (stored === "en" || stored === "ar") return stored;
+  } catch {
+    // storage unavailable — fall through to the browser language
+  }
+  return /^ar\b/.test(navigator.language || "") ? "ar" : "en";
 }
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
@@ -92,11 +104,19 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.setAttribute("lang", locale);
     document.documentElement.setAttribute("dir", DIR[locale]);
-    window.localStorage.setItem(STORAGE_KEY, locale);
   }, [locale]);
 
+  // Persist only on an explicit toggle. Persisting from the effect above
+  // also saved the initial "en" on every page load, overwriting a stored
+  // "ar" before it was adopted.
   function toggleLocale() {
-    setLocale((l) => (l === "en" ? "ar" : "en"));
+    const next: Locale = locale === "en" ? "ar" : "en";
+    setLocale(next);
+    try {
+      window.localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      // storage unavailable — the choice just won't survive a reload
+    }
   }
 
   function t(path: string, vars?: Record<string, string | number>): string {
@@ -170,14 +190,65 @@ export interface AgentDisplay {
 export function resolveAgentDisplay(
   id: string,
   agents: Record<AgentId, AgentMeta>,
-  extraAgents: ExtraAgent[]
+  extraAgents: ExtraAgent[],
+  extraText: ExtraAgentText = NO_EXTRA_TEXT
 ): AgentDisplay {
   if (id in agents) {
     const m = agents[id as AgentId];
     return { name: m.name, role: m.role, colorVar: m.colorVar };
   }
   const extra = extraAgents.find((a) => a.id === id);
-  return { name: extra?.name ?? id, role: extra?.description ?? "", colorVar: null };
+  return {
+    name: extraText.names[id] ?? extra?.name ?? id,
+    role: extraText.descriptions[id] ?? extra?.description ?? "",
+    colorVar: null,
+  };
+}
+
+/** Optional agents' names and short descriptions in the current locale,
+ * keyed by catalog id. The backend catalog only has English, so without
+ * this they stayed English (and long) in the Arabic UI. Unknown ids fall
+ * back to the catalog's own text. */
+export interface ExtraAgentText {
+  names: Record<string, string>;
+  descriptions: Record<string, string>;
+}
+
+const NO_EXTRA_TEXT: ExtraAgentText = { names: {}, descriptions: {} };
+
+export function useExtraAgentText(): ExtraAgentText {
+  const { tRaw } = useLocale();
+  return {
+    names: tRaw<Record<string, string>>("extraAgentNames"),
+    descriptions: tRaw<Record<string, string>>("extraAgentDescriptions"),
+  };
+}
+
+/** Plain function (safe in a .map): the agent with its name/description
+ * swapped for the current locale's, when there is one. */
+export function localizeExtraAgent<T extends { id: string; name: string; description: string }>(
+  agent: T,
+  text: ExtraAgentText
+): T {
+  return {
+    ...agent,
+    name: text.names[agent.id] ?? agent.name,
+    description: text.descriptions[agent.id] ?? agent.description,
+  };
+}
+
+/** timeAgo / timeUntil in the current locale ("3h ago" / "قبل 3 ساعة").
+ * Call once at the top of a component, like useAgents. */
+export function useRelativeTime(): {
+  timeAgo: (iso: string) => string;
+  timeUntil: (iso: string) => string;
+} {
+  const { tRaw } = useLocale();
+  const labels = tRaw<RelativeTimeLabels>("time");
+  return {
+    timeAgo: (iso) => timeAgo(iso, labels),
+    timeUntil: (iso) => timeUntil(iso, labels),
+  };
 }
 
 /** The four task-status labels (To do / In progress / Submitted /

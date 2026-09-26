@@ -22,19 +22,28 @@ rather than call_with_tool.
 from sqlalchemy.orm import Session
 
 from app.agents import hr, manager, mentor
+from app.agents.language import LANGUAGE_RULE
 from app.agents.llm_client import call_agentic
+from app.agents.submission_files import read_submitted_files
 from app.models import (
     AgentCatalog,
     AgentType,
     ChatMessage,
     Project,
     ProjectStatus,
+    Review,
+    ReviewKind,
     SenderType,
+    Task,
     User,
     UserAgent,
     Week,
     WeekStatus,
 )
+
+# Same per-file slice as the Mentor's review. A smaller one (1,500) left
+# the model saying it had only seen part of a typical solution file.
+_FILE_CHARS_FOR_MEETING = 4000
 
 PERSONA: dict[AgentType, str] = {
     AgentType.MANAGER: manager.SYSTEM_PROMPT,
@@ -86,6 +95,18 @@ _MEETING_FRAMING = (
     "conversation, not tied to any specific task. Answer their questions "
     "directly and helpfully in your own voice, staying in character. Keep "
     "replies concise and conversational (a few sentences), not essays."
+    # Without this, the model answered "I can't see files you sent" even
+    # though the submission's content was in its context (live-tested).
+    "\n\nYou work inside the Venv platform and have access to what the "
+    "graduate submitted: below, under 'most recent submission', is the "
+    "actual content of the last work they sent (their files, notes, and "
+    "the Mentor's review of it). When they ask about their solution, their "
+    "work, or what they sent, answer from that content — name the file and "
+    "talk about what's in it. Never say you can't see their files or ask "
+    "them to paste it again when it's there. If an earlier reply in this "
+    "conversation said you couldn't see it, that was wrong: correct it "
+    "plainly. If the section says nothing has been submitted, tell them "
+    "that instead."
 )
 
 
@@ -115,7 +136,53 @@ def _shared_context(db: Session, user: User) -> str:
                 f"Current week {week.week_number}: {week.big_task_title} — "
                 f"{week.big_task_description}"
             )
+    parts.append(
+        _latest_submission_context(db, user)
+        or "Their most recent submission: nothing has been submitted yet."
+    )
     return "\n".join(parts) if parts else "No CV, project, or history yet."
+
+
+def _latest_submission_context(db: Session, user: User) -> str | None:
+    """What the graduate most recently submitted, and the Mentor's latest
+    review of it — so "what did you think of my solution?" in a meeting
+    gets an answer about the actual work (docs/TEAM_CHANGES.md #10).
+    Before, meeting agents only knew the CV and the project."""
+    task = (
+        db.query(Task)
+        .filter(Task.user_id == user.id, Task.submitted_at.isnot(None))
+        .order_by(Task.submitted_at.desc())
+        .first()
+    )
+    if task is None:
+        return None
+    parts = [
+        f"Their most recent submission — task \"{task.title}\" "
+        f"(status: {task.status.value}):\n{task.description}"
+    ]
+    if task.github_link:
+        parts.append(f"GitHub link: {task.github_link}")
+    if task.submission_text:
+        parts.append(f"Their notes: {task.submission_text}")
+    readable, unreadable = read_submitted_files(task, max_chars_per_file=_FILE_CHARS_FOR_MEETING)
+    for filename, text in readable:
+        parts.append(f"--- {filename} ---\n{text}")
+    if unreadable:
+        parts.append("Also attached, but not readable here: " + ", ".join(unreadable))
+    review = (
+        db.query(Review)
+        .filter(
+            Review.task_id == task.id,
+            Review.agent_type == AgentType.MENTOR,
+            Review.kind == ReviewKind.TASK_REVIEW,
+        )
+        .order_by(Review.created_at.desc())
+        .first()
+    )
+    if review:
+        verdict = (review.metrics_json or {}).get("verdict", "?")
+        parts.append(f"The Mentor's latest review of it ({verdict}): {review.content}")
+    return "\n".join(parts)
 
 
 def get_history(db: Session, user: User, agent: AgentType) -> list[ChatMessage]:
@@ -150,7 +217,7 @@ def send_message(
         }
         for m in history
     ]
-    system = PERSONA[agent] + _MEETING_FRAMING + "\n\n" + _shared_context(db, user)
+    system = PERSONA[agent] + _MEETING_FRAMING + LANGUAGE_RULE + "\n\n" + _shared_context(db, user)
 
     reply_obj = call_agentic(
         system=system,

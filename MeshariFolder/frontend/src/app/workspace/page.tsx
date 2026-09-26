@@ -23,6 +23,15 @@ import { useLocale } from "@/lib/i18n/locale";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleToggle } from "@/components/locale-toggle";
 
+// GET /tasks and the status/submit endpoints return tasks without their
+// thread. Replacing a task with one of those would blank its agents panel,
+// so keep the thread that's already loaded (a thread never shrinks).
+function keepThread(next: Task, prev: Task[]): Task {
+  if (next.messages.length > 0) return next;
+  const loaded = prev.find((t) => t.id === next.id);
+  return loaded ? { ...next, messages: loaded.messages } : next;
+}
+
 export default function WorkspacePage() {
   const { user, loading: authLoading } = useRequireAuth();
   const { t } = useLocale();
@@ -40,7 +49,7 @@ export default function WorkspacePage() {
   const refresh = useCallback(async () => {
     try {
       const list = await fetchTasks();
-      setTasks(list);
+      setTasks((prev) => list.map((task) => keepThread(task, prev)));
       setError(null);
       // Auto-select the most sensible task: the open one if any, else the
       // most recent. Keeps the center panel from ever being empty when
@@ -65,14 +74,32 @@ export default function WorkspacePage() {
 
   const selected = tasks.find((t) => t.id === selectedId) ?? null;
 
-  async function openTask(id: string) {
-    setSelectedId(id);
-    try {
-      const detail = await fetchTaskDetail(id);
-      setTasks((prev) => prev.map((t) => (t.id === id ? detail : t)));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("workspace.loadTaskError"));
-    }
+  const loadThread = useCallback(
+    async (id: string) => {
+      try {
+        const detail = await fetchTaskDetail(id);
+        setTasks((prev) => prev.map((t) => (t.id === id ? detail : t)));
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : t("workspace.loadTaskError"));
+      }
+    },
+    [t]
+  );
+
+  // Load the thread whenever a task becomes selected — including the one
+  // auto-selected on page load and a newly assigned one, not only on click.
+  // Before, the agents panel stayed empty until the task was clicked.
+  useEffect(() => {
+    // setState only runs after the fetch resolves, same as refresh() above.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (selectedId) loadThread(selectedId);
+  }, [selectedId, loadThread]);
+
+  function openTask(id: string) {
+    // A different task: the effect above loads it. The same task again:
+    // reload its thread (e.g. to pick up new agent replies).
+    if (id === selectedId) loadThread(id);
+    else setSelectedId(id);
   }
 
   async function handleAskManager() {
@@ -94,10 +121,10 @@ export default function WorkspacePage() {
     try {
       if (selected.status === "todo") {
         const task = await startTask(selected.id);
-        setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
+        setTasks((prev) => prev.map((t) => (t.id === task.id ? keepThread(task, prev) : t)));
       } else if (selected.status === "in_progress" && payload) {
         const task = await submitTask(selected.id, payload);
-        setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
+        setTasks((prev) => prev.map((t) => (t.id === task.id ? keepThread(task, prev) : t)));
         setBusy({ taskId: task.id, kind: "review" });
         try {
           const reviewed = await requestMentorReview(task.id);
@@ -211,6 +238,16 @@ export default function WorkspacePage() {
                   task={selected}
                   busy={taskBusy}
                   onAdvance={handleAdvance}
+                  discussion={
+                    // The side panel below is hidden under the xl breakpoint;
+                    // there the discussion shows under the task instead.
+                    <AgentsMeeting
+                      task={selected}
+                      busy={taskBusy}
+                      extraAgents={extraAgents}
+                      onSendMessage={handleSendMessage}
+                    />
+                  }
                 />
               </div>
               <div className="hidden min-h-0 xl:block">

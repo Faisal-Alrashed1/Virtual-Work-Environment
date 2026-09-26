@@ -1,12 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
-import { GitPullRequest, Calendar, CircleCheck, Clock, Paperclip, X } from "lucide-react";
+import { GitPullRequest, Calendar, CircleAlert, CircleCheck, Clock, Paperclip, X } from "lucide-react";
 import { STATUS_ORDER, type Task } from "@/lib/tasks";
-import { timeUntil, timeAgo } from "@/lib/format";
 import { AttachmentList } from "@/components/workspace/attachment-list";
-import { useAgents, useLocale, useStatusLabels } from "@/lib/i18n/locale";
+import { useAgents, useLocale, useStatusLabels, useRelativeTime } from "@/lib/i18n/locale";
 
 export interface SubmitPayload {
   githubLink?: string;
@@ -18,18 +17,28 @@ interface TaskWorkspaceProps {
   task: Task;
   busy: "review" | "reply" | null;
   onAdvance: (payload?: SubmitPayload) => void;
+  /** Rendered under the task on screens too narrow for the side panel. */
+  discussion?: ReactNode;
 }
 
 const MAX_FILES = 5;
 
-export function TaskWorkspace({ task, busy, onAdvance }: TaskWorkspaceProps) {
+export function TaskWorkspace({ task, busy, onAdvance, discussion }: TaskWorkspaceProps) {
   const { t } = useLocale();
+  const { timeAgo, timeUntil } = useRelativeTime();
   const agents = useAgents();
   const statusLabels = useStatusLabels();
   const [linkDraft, setLinkDraft] = useState("");
   const [textDraft, setTextDraft] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const agent = agents[task.createdByAgent];
+  // The Mentor only posts in a thread when it reviews. On a task that's back
+  // in progress, that means it asked for changes — without this, the form
+  // just reappeared blank and the review looked like it never came.
+  const mentorFeedback =
+    task.status === "in_progress"
+      ? [...task.messages].reverse().find((m) => m.agentType === "mentor") ?? null
+      : null;
 
   const canSubmit = linkDraft.trim() || textDraft.trim() || files.length > 0;
 
@@ -143,6 +152,26 @@ export function TaskWorkspace({ task, busy, onAdvance }: TaskWorkspaceProps) {
           )}
           {task.status === "in_progress" && (
             <div className="flex flex-col gap-3">
+              {mentorFeedback && (
+                <div className="rounded border border-border bg-bg-surface-raised p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                    <CircleAlert className="h-4 w-4 text-danger" />
+                    <span>{t("taskWorkspace.changesRequested")}</span>
+                  </div>
+                  <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-text-secondary">
+                    {mentorFeedback.content}
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <Link
+                      href={`/tasks/${task.id}/review`}
+                      className="rounded border border-border px-3 py-1.5 text-xs text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary"
+                    >
+                      {t("taskWorkspace.seeFullReview")}
+                    </Link>
+                    <span className="text-xs text-text-muted">{t("taskWorkspace.resubmitHint")}</span>
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="font-mono text-[11px] text-text-muted">
                   {t("taskWorkspace.githubLinkLabel")}
@@ -260,6 +289,12 @@ export function TaskWorkspace({ task, busy, onAdvance }: TaskWorkspaceProps) {
               </p>
             )}
             <AttachmentList taskId={task.id} attachments={task.attachments} />
+          </div>
+        )}
+
+        {discussion && (
+          <div className="mt-6 h-[28rem] overflow-hidden rounded border border-border xl:hidden">
+            {discussion}
           </div>
         )}
       </div>

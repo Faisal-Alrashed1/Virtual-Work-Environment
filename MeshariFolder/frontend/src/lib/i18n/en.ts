@@ -108,8 +108,7 @@ const en = {
       "Venv simulates a real company around you \u2014 a Manager who assigns your work, a Mentor who reviews it, and HR who tracks how you're growing. This walkthrough covers your team, your first project, and how the week-to-week rhythm works.",
     yourTeamEyebrow: "your_team",
     extrasNote:
-      "Manager, Mentor, and HR handle task reviews today \u2014 the rest of your team joins the workflow as we build them in.",
-    soonBadge: "soon",
+      "Your extra agents are part of the team too: the reviewers look at your submissions alongside the Mentor, and you can talk to any of them in the meeting room.",
     yourProjectEyebrow: "your_project",
     projectError:
       "Couldn't reach the Manager just now \u2014 no project yet. Head to the task board and ask for one when you're ready.",
@@ -266,8 +265,7 @@ const en = {
       "Submit a task first \u2014 the mentor reviews it with feedback and a rubric score.",
     addedToTeam: "Added to your team during onboarding",
     statusLabel: "status",
-    customAgentStatus:
-      "Not wired into the task flow yet \u2014 Manager, Mentor, and HR do the actual reviewing for now.",
+    customAgentStatus: "On your team \u2014 talk to it any time in the meeting room.",
     weekTitle: "Week {n}",
     weekStatusFallback: "Week status",
     noActiveWeek: "No active week yet \u2014 ask the manager for your first task and one will start.",
@@ -359,6 +357,8 @@ const en = {
     waitingOnMentor: "Waiting on the mentor's review.",
     reviewedByMentor: "Reviewed by the mentor.",
     seeFullReview: "See the full review",
+    changesRequested: "The mentor asked for changes.",
+    resubmitHint: "Update your work and submit it again below.",
     yourSubmission: "your submission",
   },
   agentsMeeting: {
@@ -413,6 +413,33 @@ const en = {
     in_progress: "In progress",
     submitted: "Submitted",
     reviewed: "Reviewed",
+  },
+  // Display names for the optional agents, keyed by catalog id. The backend
+  // catalog stores English names; this lets conversations show them in the
+  // current language (resolveAgentDisplay in lib/i18n/locale.tsx).
+  extraAgentNames: {
+    security_reviewer: "Security reviewer",
+    data_reviewer: "Data reviewer",
+    career_coach: "Career coach",
+    devops: "DevOps",
+  },
+  extraAgentDescriptions: {
+    security_reviewer: "Checks your code for security issues.",
+    data_reviewer: "Checks your data work and how your model is evaluated.",
+    career_coach: "Helps with your CV and interview prep.",
+    devops: "Reviews your deployment and CI/CD setup.",
+  },
+  // Relative times — see lib/format.ts's timeAgo/timeUntil and
+  // useRelativeTime in lib/i18n/locale.tsx.
+  time: {
+    justNow: "just now",
+    minutesAgo: "{n}m ago",
+    hoursAgo: "{n}h ago",
+    daysAgo: "{n}d ago",
+    inMinutes: "in {n}m",
+    inHours: "in {n}h",
+    inDays: "in {n}d",
+    pastDue: "past due",
   },
 };
 

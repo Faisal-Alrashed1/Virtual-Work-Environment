@@ -16,8 +16,7 @@ import { ApiError } from "@/lib/api";
 import { fetchEmployeeFile, type EmployeeFile } from "@/lib/employee-file";
 import { api } from "@/lib/api";
 import { averageScore, fetchMyReviews, type Review } from "@/lib/reviews";
-import { timeAgo } from "@/lib/format";
-import { useAgents, useLocale } from "@/lib/i18n/locale";
+import { useAgents, useLocale, useRelativeTime } from "@/lib/i18n/locale";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleToggle } from "@/components/locale-toggle";
 
@@ -48,6 +47,7 @@ function ChartTooltip({
 export default function GrowthPage() {
   const { user, loading: authLoading } = useRequireAuth();
   const { t } = useLocale();
+  const { timeAgo } = useRelativeTime();
   const { hr } = useAgents();
 
   const [employeeFile, setEmployeeFile] = useState<EmployeeFile | null>(null);
@@ -91,7 +91,9 @@ export default function GrowthPage() {
   }
 
   const mentorReviews = reviews.filter((r) => r.agentType === "mentor" && r.taskId);
-  const chartData = mentorReviews.map((r) => ({
+  // A review with no rubric scores (the Mentor couldn't open anything
+  // submitted) isn't a 0/5 — leave it out of the score trend.
+  const chartData = mentorReviews.filter((r) => r.categories.length > 0).map((r) => ({
     label: r.content.slice(0, 24),
     score: Number(averageScore(r).toFixed(2)),
   }));
@@ -262,7 +264,9 @@ export default function GrowthPage() {
                         </p>
                       </div>
                       <span className="font-mono text-xs text-text-secondary">
-                        {averageScore(review).toFixed(2)}/5
+                        {review.categories.length > 0
+                          ? `${averageScore(review).toFixed(2)}/5`
+                          : "—"}
                       </span>
                     </Link>
                   ))}

@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { motion } from "framer-motion";
 import type { Week } from "@/lib/projects";
-import { timeUntil } from "@/lib/format";
-import { useLocale } from "@/lib/i18n/locale";
+import { useLocale, useRelativeTime } from "@/lib/i18n/locale";
 
 interface WeekStripProps {
   week: Week | null;
@@ -13,6 +12,7 @@ interface WeekStripProps {
 
 export function WeekStrip({ week, projectTitle }: WeekStripProps) {
   const { t } = useLocale();
+  const { timeUntil } = useRelativeTime();
   if (!week) return null;
 
   return (

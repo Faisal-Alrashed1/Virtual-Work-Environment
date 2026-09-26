@@ -2,10 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Users } from "lucide-react";
-import { resolveAgentDisplay, useAgents, useLocale } from "@/lib/i18n/locale";
+import { resolveAgentDisplay, useAgents, useExtraAgentText, useLocale, useRelativeTime } from "@/lib/i18n/locale";
 import type { ExtraAgent } from "@/lib/team";
 import type { Task } from "@/lib/tasks";
-import { timeAgo } from "@/lib/format";
 
 interface AgentsMeetingProps {
   task: Task;
@@ -26,6 +25,8 @@ interface AgentsMeetingProps {
  */
 export function AgentsMeeting({ task, busy, extraAgents, onSendMessage }: AgentsMeetingProps) {
   const { t } = useLocale();
+  const { timeAgo } = useRelativeTime();
+  const extraText = useExtraAgentText();
   const agents = useAgents();
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -59,7 +60,7 @@ export function AgentsMeeting({ task, busy, extraAgents, onSendMessage }: Agents
         ) : (
           <div className="flex flex-col gap-3">
             {task.messages.map((m) => {
-              const meta = m.agentType ? resolveAgentDisplay(m.agentType, agents, extraAgents) : null;
+              const meta = m.agentType ? resolveAgentDisplay(m.agentType, agents, extraAgents, extraText) : null;
               const isUser = !meta;
               return (
                 <div

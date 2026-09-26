@@ -224,3 +224,110 @@ BEHAVIORAL_REVIEW_TOOL = {
         "required": ["summary", "consistency_rating"],
     },
 }
+
+# Shared shape for the two specialist reviewers below (security_reviewer.py,
+# data_reviewer.py) — a structured finding, not a free-text comment, so
+# their output can be stored/compared/tracked the same way the Mentor's
+# rubric already is (see Review.kind == SPECIALIST_REVIEW in models.py).
+_FINDING_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "category": {"type": "string"},
+        "severity": {"type": "string", "enum": ["low", "medium", "high"]},
+        "description": {"type": "string", "description": "What was actually found, specific to this submission."},
+        "recommendation": {"type": "string", "description": "The concrete fix or next step."},
+    },
+    "required": ["category", "severity", "description", "recommendation"],
+}
+
+SUBMIT_SECURITY_REVIEW_TOOL = {
+    "name": "submit_security_review",
+    "description": (
+        "Submit a structured security review of a submitted task — real "
+        "vulnerabilities and secure-coding concerns grounded in the actual "
+        "repo content provided (dependency files, config, code), not "
+        "generic security advice. Empty findings if nothing's concerning."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": ["clear", "concerns_found"]},
+            "risk_level": {
+                "type": "string",
+                "enum": ["low", "medium", "high"],
+                "description": "Overall risk level across every finding — 'low' if findings is empty.",
+            },
+            "findings": {
+                "type": "array",
+                "items": {
+                    **_FINDING_SCHEMA,
+                    "properties": {
+                        **_FINDING_SCHEMA["properties"],
+                        "category": {
+                            "type": "string",
+                            "enum": [
+                                "dependency_vulnerability",
+                                "hardcoded_secret",
+                                "injection_risk",
+                                "authentication_weakness",
+                                "insecure_configuration",
+                                "other",
+                            ],
+                        },
+                    },
+                },
+            },
+            "summary": {
+                "type": "string",
+                "description": "2-4 sentences, posted in the task thread — specific to what was actually reviewed.",
+            },
+        },
+        "required": ["verdict", "risk_level", "findings", "summary"],
+    },
+}
+
+SUBMIT_DATA_REVIEW_TOOL = {
+    "name": "submit_data_review",
+    "description": (
+        "Submit a structured data-quality review of a submitted task — "
+        "concrete issues in the actual notebook/pipeline content provided "
+        "(data leakage, reproducibility, evaluation methodology), not "
+        "textbook generalities. Empty findings if nothing's concerning."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": ["clear", "concerns_found"]},
+            "risk_level": {
+                "type": "string",
+                "enum": ["low", "medium", "high"],
+                "description": "Overall risk level across every finding — 'low' if findings is empty.",
+            },
+            "findings": {
+                "type": "array",
+                "items": {
+                    **_FINDING_SCHEMA,
+                    "properties": {
+                        **_FINDING_SCHEMA["properties"],
+                        "category": {
+                            "type": "string",
+                            "enum": [
+                                "data_leakage",
+                                "reproducibility",
+                                "evaluation_methodology",
+                                "data_quality",
+                                "documentation",
+                                "other",
+                            ],
+                        },
+                    },
+                },
+            },
+            "summary": {
+                "type": "string",
+                "description": "2-4 sentences, posted in the task thread — specific to what was actually reviewed.",
+            },
+        },
+        "required": ["verdict", "risk_level", "findings", "summary"],
+    },
+}

@@ -68,6 +68,9 @@ than uniformly.
    keeping only providers that have a key set.
 2. It calls the first provider in that chain.
 3. If that call fails with an availability-related error (auth error, rate limit, no credit, connection error), it automatically retries with the next provider in the chain.
+   If the provider answers but skips the forced tool call (plain text, or
+   broken JSON arguments — a `ToolCallError`), it's retried once on the
+   same provider, then fails over the same way. See `docs/TEAM_CHANGES.md` #2.
 4. If all configured providers fail, the API returns a clear `503` error instead of crashing.
 5. If no provider has a key configured at all, the API returns a `503` explaining that `LLM_PROVIDER_PRIORITY` (or the tier-specific override) / API keys need to be set.
 

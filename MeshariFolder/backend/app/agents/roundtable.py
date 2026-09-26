@@ -21,8 +21,9 @@ rest of the table carries on.
 """
 from sqlalchemy.orm import Session
 
-from app.agents import manager
+from app.agents import data_reviewer, manager, security_reviewer
 from app.agents.github_client import fetch_repo_context
+from app.agents.language import LANGUAGE_RULE
 from app.agents.llm_client import call_agentic
 from app.agents.meeting import PERSONA
 from app.models import (
@@ -40,6 +41,17 @@ ROUNDTABLE_AGENTS = {
     AgentType.SECURITY_REVIEWER,
     AgentType.DATA_REVIEWER,
     AgentType.DEVOPS,
+}
+
+# Security Reviewer / Data Reviewer graduated from a free-text persona
+# comment to a real, structured review of their own (security_reviewer.py,
+# data_reviewer.py) — grounded in actual repo content, not just a prompt.
+# DevOps stays on the original free-text path below; it wasn't part of
+# this round of work. Keyed by AgentType so the dispatch in run_roundtable
+# is a single lookup rather than a chain of ifs.
+_STRUCTURED_REVIEWERS = {
+    AgentType.SECURITY_REVIEWER: security_reviewer,
+    AgentType.DATA_REVIEWER: data_reviewer,
 }
 
 _SPECIALIST_FRAMING = (
@@ -130,25 +142,35 @@ def run_roundtable(db: Session, user: User, task: Task) -> list[TaskMessage]:
 
     for agent_type in active:
         discussion_so_far = "\n\n".join(transcript)
+        reviewer_module = _STRUCTURED_REVIEWERS.get(agent_type)
         try:
-            reply = call_agentic(
-                system=PERSONA[agent_type] + _SPECIALIST_FRAMING,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": (
-                            f"{submission}\n\n--- Team discussion so far ---\n"
-                            f"{discussion_so_far}\n\n--- Your turn ---"
-                        ),
-                    }
-                ],
-                tools=[],
-                tier="small",
-                max_tokens=400,
-            )
+            if reviewer_module is not None:
+                # Security Reviewer / Data Reviewer: real repo analysis +
+                # a structured, storable finding (their own tool schema),
+                # not a free-text comment — see security_reviewer.py /
+                # data_reviewer.py. discussion_so_far keeps them part of
+                # the actual roundtable conversation on top of that.
+                review = reviewer_module.review_task(db, task, user, discussion_so_far)
+                text = review.content
+            else:
+                reply = call_agentic(
+                    system=PERSONA[agent_type] + _SPECIALIST_FRAMING + LANGUAGE_RULE,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": (
+                                f"{submission}\n\n--- Team discussion so far ---\n"
+                                f"{discussion_so_far}\n\n--- Your turn ---"
+                            ),
+                        }
+                    ],
+                    tools=[],
+                    tier="small",
+                    max_tokens=400,
+                )
+                text = reply.text
         except Exception:
             continue
-        text = reply.text
         if not text:
             continue
         posted.append(_post(db, task, agent_type, text))
@@ -159,7 +181,7 @@ def run_roundtable(db: Session, user: User, task: Task) -> list[TaskMessage]:
         discussion = "\n\n".join(transcript)
         try:
             reply = call_agentic(
-                system=manager.SYSTEM_PROMPT + _MANAGER_SYNTHESIS_FRAMING,
+                system=manager.SYSTEM_PROMPT + _MANAGER_SYNTHESIS_FRAMING + LANGUAGE_RULE,
                 messages=[
                     {
                         "role": "user",

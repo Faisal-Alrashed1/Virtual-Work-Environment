@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { AGENT_ORDER, type AgentId } from "@/lib/agents";
-import { resolveAgentDisplay, useAgents, useLocale } from "@/lib/i18n/locale";
+import { resolveAgentDisplay, useAgents, useExtraAgentText, useLocale, useRelativeTime } from "@/lib/i18n/locale";
 import { fetchMyExtraAgents, type ExtraAgent } from "@/lib/team";
 import { useRequireAuth } from "@/lib/auth-context";
 import { ApiError } from "@/lib/api";
@@ -13,7 +13,6 @@ import {
   sendChatMessage,
   type ChatMessage,
 } from "@/lib/meeting";
-import { timeAgo } from "@/lib/format";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleToggle } from "@/components/locale-toggle";
 
@@ -28,6 +27,8 @@ function Dot({ colorVar, className = "h-2 w-2" }: { colorVar: string | null; cla
 export default function MeetingPage() {
   const { user, loading: authLoading } = useRequireAuth();
   const { t } = useLocale();
+  const { timeAgo } = useRelativeTime();
+  const extraText = useExtraAgentText();
   const agents = useAgents();
   const OPENERS: Record<AgentId, string> = {
     manager: t("meeting.openers.manager"),
@@ -106,7 +107,7 @@ export default function MeetingPage() {
     );
   }
 
-  const meta = resolveAgentDisplay(agent, agents, extraAgents);
+  const meta = resolveAgentDisplay(agent, agents, extraAgents, extraText);
   const opener = agent in agents ? OPENERS[agent as AgentId] : meta.role;
   const allAgentIds = [...AGENT_ORDER, ...extraAgents.map((a) => a.id)];
 
@@ -153,7 +154,7 @@ export default function MeetingPage() {
       <div className="grid min-h-0 grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)]">
         <div className="flex gap-2 overflow-x-auto border-b border-border p-3 md:flex-col md:overflow-visible md:border-b-0 md:border-e">
           {allAgentIds.map((id) => {
-            const m = resolveAgentDisplay(id, agents, extraAgents);
+            const m = resolveAgentDisplay(id, agents, extraAgents, extraText);
             const active = id === agent;
             return (
               <button
